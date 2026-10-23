@@ -8,3 +8,5 @@ channels-redis>=4.2
 celery>=5.4
 redis>=5.0
 Pillow>=10.4
+drf-spectacular>=0.28.0
+ruff

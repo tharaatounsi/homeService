@@ -12,12 +12,12 @@ class User(AbstractUser):
     role = models.CharField(max_length=20, choices=Role.choices, default=Role.CLIENT)
     phone = models.CharField(max_length=20, blank=True)
 
-    # Connexion par email (le username reste obligatoire pour l'affichage).
+    # iconecty bl email chaque utilisateur
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS = ["username"]
 
     def save(self, *args, **kwargs):
-        # Un superutilisateur est toujours administrateur.
+        # ladmin hoia super user
         if self.is_superuser:
             self.role = self.Role.ADMIN
         super().save(*args, **kwargs)

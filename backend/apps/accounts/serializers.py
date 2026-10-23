@@ -1,12 +1,10 @@
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.db import transaction
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
-from apps.technicians.models import TechnicianProfile
-
 from .models import User
+from .services import register_user
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -18,7 +16,7 @@ class UserSerializer(serializers.ModelSerializer):
 
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True)
-    # Seuls client et technicien peuvent s'inscrire eux-mêmes.
+    
     role = serializers.ChoiceField(
         choices=[(User.Role.CLIENT, "Client"), (User.Role.TECHNICIAN, "Technicien")],
         default=User.Role.CLIENT,
@@ -41,13 +39,8 @@ class RegisterSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(list(exc.messages))
         return value
 
-    @transaction.atomic
     def create(self, validated_data):
-        password = validated_data.pop("password")
-        user = User.objects.create_user(password=password, **validated_data)
-        if user.role == User.Role.TECHNICIAN:
-            TechnicianProfile.objects.create(user=user)
-        return user
+        return register_user(validated_data)
 
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):

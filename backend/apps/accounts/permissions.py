@@ -4,7 +4,7 @@ from .models import User
 
 
 class HasRole(BasePermission):
-    """Autorise uniquement les utilisateurs connectés ayant l'un des rôles listés."""
+    """Autorise barka l utilisateur eli aandhom role"""
 
     allowed_roles = ()
 
@@ -21,5 +21,11 @@ class IsTechnician(HasRole):
     allowed_roles = (User.Role.TECHNICIAN,)
 
 
-class IsAdminRole(HasRole):
-    allowed_roles = (User.Role.ADMIN,)
+class IsAdminRole(BasePermission):
+    def has_permission(self, request, view):
+        user = request.user
+        return bool(
+            user
+            and user.is_authenticated
+            and (user.role == User.Role.ADMIN or user.is_staff or user.is_superuser)
+        )

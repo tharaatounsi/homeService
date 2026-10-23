@@ -1,5 +1,5 @@
 import { Component, inject, signal } from '@angular/core';
-import { ActivatedRoute } from '@angular/router';
+import { ActivatedRoute, RouterLink } from '@angular/router';
 
 import { AuthService } from '../../core/auth.service';
 
@@ -23,6 +23,7 @@ interface ProviderProfile {
 @Component({
   selector: 'app-role-home',
   standalone: true,
+  imports: [RouterLink],
   template: `
     <div class="dashboard-page">
       <!-- Top Navigation Bar -->
@@ -37,13 +38,19 @@ interface ProviderProfile {
           </div>
 
           <div class="user-menu">
-            <div class="user-avatar">
+            <div class="user-avatar" [routerLink]="activeRole() === 'client' ? '/client/profile' : null" [style.cursor]="activeRole() === 'client' ? 'pointer' : 'default'">
               <img [src]="userPhoto()" [alt]="auth.user()?.username || 'User'" />
             </div>
             <div class="user-details">
               <span class="username">{{ auth.user()?.username || 'Utilisateur' }}</span>
               <span class="email">{{ auth.user()?.email }}</span>
             </div>
+            @if (activeRole() === 'client') {
+              <button class="btn-logout" routerLink="/client/profile" title="Mon Profil" style="border-color: #3b82f6; color: #2563eb; background: #eff6ff;">
+                <i class="fa-solid fa-user-gear"></i>
+                <span class="logout-text">Mon Profil</span>
+              </button>
+            }
             <button class="btn-logout" (click)="auth.logout()" title="Déconnexion">
               <i class="fa-solid fa-power-off"></i>
               <span class="logout-text">Déconnexion</span>

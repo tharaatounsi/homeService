@@ -1,13 +1,16 @@
-import { Component, inject, signal } from '@angular/core';
-import { ActivatedRoute } from '@angular/router';
+import { Component, OnInit, inject, signal } from '@angular/core';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 
 import { AuthService } from '../../core/auth.service';
+import { TechnicianService } from '../../core/technician.service';
 
 interface ProviderProfile {
   id: number;
+  userId: number;
   name: string;
   roleType: 'technician' | 'housekeeper';
-  categoryKey: 'menage' | 'plomberie' | 'electricite' | 'menuiserie' | 'serrurerie' | 'peinture';
+  categoryKey: string;
+  categoryKeys: string[];
   roleTitle: string;
   photo: string;
   specialty: string;
@@ -23,6 +26,7 @@ interface ProviderProfile {
 @Component({
   selector: 'app-role-home',
   standalone: true,
+  imports: [RouterLink],
   template: `
     <div class="dashboard-page">
       <!-- Top Navigation Bar -->
@@ -37,13 +41,23 @@ interface ProviderProfile {
           </div>
 
           <div class="user-menu">
-            <div class="user-avatar">
+            <div class="user-avatar" [routerLink]="activeRole() === 'client' ? '/client/profile' : null" [style.cursor]="activeRole() === 'client' ? 'pointer' : 'default'">
               <img [src]="userPhoto()" [alt]="auth.user()?.username || 'User'" />
             </div>
             <div class="user-details">
               <span class="username">{{ auth.user()?.username || 'Utilisateur' }}</span>
               <span class="email">{{ auth.user()?.email }}</span>
             </div>
+            @if (activeRole() === 'client') {
+              <button class="btn-logout" [routerLink]="['/client/profile']" [queryParams]="{ tab: 'messages' }" title="Messagerie" style="border-color: #10b981; color: #047857; background: #ecfdf5;">
+                <i class="fa-solid fa-comments"></i>
+                <span class="logout-text">Messagerie</span>
+              </button>
+              <button class="btn-logout" routerLink="/client/profile" title="Mon Profil" style="border-color: #3b82f6; color: #2563eb; background: #eff6ff;">
+                <i class="fa-solid fa-user-gear"></i>
+                <span class="logout-text">Mon Profil</span>
+              </button>
+            }
             <button class="btn-logout" (click)="auth.logout()" title="Déconnexion">
               <i class="fa-solid fa-power-off"></i>
               <span class="logout-text">Déconnexion</span>
@@ -197,7 +211,7 @@ interface ProviderProfile {
                 [class.active]="providerFilter() === 'all'"
                 (click)="providerFilter.set('all')"
               >
-                Tous ({{ providers.length }})
+                Tous ({{ providers().length }})
               </button>
               <button
                 class="pill-btn"
@@ -286,11 +300,26 @@ interface ProviderProfile {
                   }
                 </div>
 
-                <div class="provider-card-footer">
+                <div class="provider-card-footer" style="display: flex; flex-direction: column; gap: 8px;">
+                  <button
+                    class="btn-book"
+                    style="background: #2563eb;"
+                    (click)="openMessaging(p)"
+                  >
+                    <i class="fa-solid fa-comments"></i> Contacter / Messagerie
+                  </button>
                   <button class="btn-book" (click)="requestService(p)">
                     <i class="fa-regular fa-paper-plane"></i> Réserver une intervention
                   </button>
                 </div>
+              </div>
+            } @empty {
+              <div class="empty-providers-state">
+                <i class="fa-solid fa-user-slash"></i>
+                <p>Aucun prestataire disponible pour le moment dans cette catégorie.</p>
+                <button type="button" class="btn-reset-filters" (click)="providerFilter.set('all'); selectedCategory.set(null)">
+                  Voir tous les prestataires
+                </button>
               </div>
             }
           </div>
@@ -805,6 +834,45 @@ interface ProviderProfile {
       .stat-number { display: block; font-size: 22px; font-weight: 800; color: #0f172a; }
       .stat-label { font-size: 13px; color: #64748b; }
 
+      .empty-providers-state {
+        grid-column: 1 / -1;
+        text-align: center;
+        padding: 48px 24px;
+        background: #ffffff;
+        border: 2px dashed #cbd5e1;
+        border-radius: 16px;
+        color: #64748b;
+      }
+
+      .empty-providers-state i {
+        font-size: 40px;
+        color: #94a3b8;
+        margin-bottom: 12px;
+        display: block;
+      }
+
+      .empty-providers-state p {
+        font-size: 15px;
+        font-weight: 500;
+        margin-bottom: 12px;
+      }
+
+      .btn-reset-filters {
+        padding: 8px 16px;
+        background: #eff6ff;
+        color: #2563eb;
+        border: 1px solid #bfdbfe;
+        border-radius: 8px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+
+      .btn-reset-filters:hover {
+        background: #2563eb;
+        color: #ffffff;
+      }
+
       @media (max-width: 992px) {
         .categories-grid, .providers-grid, .stats-grid { grid-template-columns: repeat(2, 1fr); }
         .welcome-hero { flex-direction: column; align-items: flex-start; }
@@ -818,98 +886,66 @@ interface ProviderProfile {
     `,
   ],
 })
-export class RoleHomeComponent {
+export class RoleHomeComponent implements OnInit {
   auth = inject(AuthService);
+  private techService = inject(TechnicianService);
+  private router = inject(Router);
   title: string = inject(ActivatedRoute).snapshot.data['title'];
 
   searchQuery = signal('');
   selectedCategory = signal<string | null>(null);
   providerFilter = signal<string>('all');
   toastMessage = signal<string | null>(null);
+  isLoading = signal(true);
 
-  // Diverse list of specialized technicians and housekeepers
-  providers: ProviderProfile[] = [
-    {
-      id: 1,
-      name: 'Sophie Ben Salem',
-      roleType: 'housekeeper',
-      categoryKey: 'menage',
-      roleTitle: 'Femme de ménage certifiée',
-      photo: '/assets/images/housekeeper.jpg',
-      specialty: 'Ménage régulier & Repassage',
-      rating: 4.9,
-      reviewsCount: 42,
-      experienceYears: 6,
-      city: 'Tunis / Ariana',
-      hourlyRate: '25 DT / heure',
-      isAvailable: true,
-      badges: ['Ménage complet', 'Nettoyage vitres', 'Eco-produits'],
-    },
-    {
-      id: 2,
-      name: 'Karim Mansouri',
-      roleType: 'technician',
-      categoryKey: 'electricite',
-      roleTitle: 'Électricien & Domotique',
-      photo: '/assets/images/hero.jpg',
-      specialty: 'Dépannage électrique & Tableau',
-      rating: 5.0,
-      reviewsCount: 51,
-      experienceYears: 7,
-      city: 'Lyon / Villeurbanne',
-      hourlyRate: '45 € / heure',
-      isAvailable: true,
-      badges: ['Normes NFC', 'Court-circuit', 'Luminaires'],
-    },
-    {
-      id: 3,
-      name: 'Youssef Bennani',
-      roleType: 'technician',
-      categoryKey: 'menuiserie',
-      roleTitle: 'Menuisier & Ebéniste',
-      photo: '/assets/images/technician.jpg',
-      specialty: 'Meubles sur-mesure & Parquets',
-      rating: 4.9,
-      reviewsCount: 29,
-      experienceYears: 10,
-      city: 'Paris & Île-de-France',
-      hourlyRate: '50 € / heure',
-      isAvailable: true,
-      badges: ['Menuiserie Bois/PVC', 'Parquet', 'Cuisine sur mesure'],
-    },
-    {
-      id: 4,
-      name: 'Marc Laurent',
-      roleType: 'technician',
-      categoryKey: 'plomberie',
-      roleTitle: 'Technicien Plombier',
-      photo: '/assets/images/service_plumbing.jpg',
-      specialty: 'Dépannage plomberie d\'urgence',
-      rating: 4.8,
-      reviewsCount: 38,
-      experienceYears: 8,
-      city: 'Marseille & Environs',
-      hourlyRate: '40 € / heure',
-      isAvailable: true,
-      badges: ['Chauffe-eau', 'Fuites d\'eau', 'Débouchage'],
-    },
-    {
-      id: 5,
-      name: 'Thomas Dubois',
-      roleType: 'technician',
-      categoryKey: 'serrurerie',
-      roleTitle: 'Serrurier & Sécurité',
-      photo: '/assets/images/client.jpg',
-      specialty: 'Ouverture de porte & Changement serrure',
-      rating: 4.9,
-      reviewsCount: 34,
-      experienceYears: 9,
-      city: 'Bordeaux Centre',
-      hourlyRate: '55 € / heure',
-      isAvailable: true,
-      badges: ['Urgence 24/7', 'Portes blindées', 'Serrures haute sécurité'],
-    },
-  ];
+  providers = signal<ProviderProfile[]>([]);
+
+  ngOnInit(): void {
+    this.loadPublicProviders();
+  }
+
+  loadPublicProviders(): void {
+    this.isLoading.set(true);
+    this.techService.getPublicTechnicians().subscribe({
+      next: (data) => {
+        const mapped: ProviderProfile[] = data.map((t) => {
+          const catSlugs = t.category_list.map((c) => c.slug);
+          const catNames = t.category_list.map((c) => c.name);
+          const isHousekeeper = catSlugs.includes('menage');
+          const primaryCat = catSlugs[0] || 'autre';
+          const title = isHousekeeper
+            ? 'Femme de ménage qualifiée'
+            : catNames.length > 0
+            ? catNames.join(' & ')
+            : 'Technicien vérifié';
+
+          return {
+            id: t.id,
+            userId: t.user_id || t.id,
+            name: t.username,
+            roleType: isHousekeeper ? 'housekeeper' : 'technician',
+            categoryKey: primaryCat,
+            categoryKeys: catSlugs,
+            roleTitle: title,
+            photo: isHousekeeper ? '/assets/images/service_cleaning.jpg' : '/assets/images/technician.jpg',
+            specialty: t.bio || 'Interventions et réparations professionnelles à domicile',
+            rating: Number(t.rating_avg) || 5.0,
+            reviewsCount: t.rating_count,
+            experienceYears: t.experience_years,
+            city: `Grand Tunis (Rayon ${t.service_radius_km} km)`,
+            hourlyRate: 'Sur devis',
+            isAvailable: t.is_available,
+            badges: catNames.length > 0 ? catNames : ['Prestataire vérifié'],
+          };
+        });
+        this.providers.set(mapped);
+        this.isLoading.set(false);
+      },
+      error: () => {
+        this.isLoading.set(false);
+      },
+    });
+  }
 
   activeRole(): string {
     return this.auth.user()?.role || 'client';
@@ -958,10 +994,11 @@ export class RoleHomeComponent {
     const filter = this.providerFilter();
     const query = this.searchQuery().toLowerCase().trim();
 
-    return this.providers.filter((p) => {
+    return this.providers().filter((p) => {
       const matchFilter =
         filter === 'all' ||
         p.categoryKey === filter ||
+        p.categoryKeys.includes(filter) ||
         (filter === 'housekeeper' && p.roleType === 'housekeeper') ||
         (filter === 'technician' && p.roleType === 'technician');
 
@@ -976,10 +1013,34 @@ export class RoleHomeComponent {
     });
   }
 
+  openMessaging(provider: ProviderProfile): void {
+    const user = this.auth.user();
+    if (!user) {
+      this.router.navigate(['/login']);
+      return;
+    }
+    if (user.role === 'technician') {
+      this.router.navigate(['/technician']);
+      return;
+    }
+    this.router.navigate(['/client/profile'], {
+      queryParams: { tab: 'messages', partner: provider.userId },
+    });
+  }
+
   requestService(provider: ProviderProfile): void {
-    this.toastMessage.set(
-      `Votre demande d'intervention auprès de ${provider.name} (${provider.roleTitle}) a été transmise avec succès !`
-    );
-    setTimeout(() => this.toastMessage.set(null), 5000);
+    const user = this.auth.user();
+    if (!user) {
+      this.router.navigate(['/login']);
+      return;
+    }
+    if (user.role === 'technician') {
+      this.toastMessage.set('Vous êtes connecté en tant que prestataire. Connectez-vous avec un compte client pour commander.');
+      setTimeout(() => this.toastMessage.set(null), 4000);
+      return;
+    }
+    this.router.navigate(['/client/profile'], {
+      queryParams: { tab: 'new_request', category: provider.categoryKey, technician: provider.userId },
+    });
   }
 }

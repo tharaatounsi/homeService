@@ -98,6 +98,31 @@ class AuthApiTests(APITestCase):
         self.assertEqual(user.phone, "+21650000000")
         self.assertEqual(user.role, "client")  # le rôle ne peut pas être modifié
 
+    def test_me_updates_personal_info_with_null_and_empty(self):
+        self.client.post(self.register_url, self.payload(), format="json")
+        token = self.login().json()["access"]
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+        response = self.client.patch(
+            self.me_url,
+            {"first_name": "Amine", "last_name": "Ben Salah", "phone": "+21699887766"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["first_name"], "Amine")
+        self.assertEqual(response.json()["last_name"], "Ben Salah")
+        self.assertEqual(response.json()["phone"], "+21699887766")
+
+        # Test avec valeurs nulles et vides
+        response = self.client.patch(
+            self.me_url,
+            {"first_name": None, "last_name": "", "phone": None},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["first_name"], "")
+        self.assertEqual(response.json()["last_name"], "")
+        self.assertEqual(response.json()["phone"], "")
+
     def test_refresh_token(self):
         self.client.post(self.register_url, self.payload(), format="json")
         refresh = self.login().json()["refresh"]
@@ -115,3 +140,88 @@ class PermissionTests(TestCase):
         self.assertTrue(IsTechnician().has_permission(self.request_for(tech), None))
         self.assertFalse(IsClient().has_permission(self.request_for(tech), None))
         self.assertFalse(IsAdminRole().has_permission(self.request_for(tech), None))
+
+
+class AddressApiTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user("amine", "amine@example.com", PASSWORD, role="client")
+        self.client.force_authenticate(user=self.user)
+
+    def test_create_and_list_address(self):
+        payload = {
+            "label": "Maison",
+            "address": "10 Rue de Rome",
+            "city": "Tunis",
+            "postal_code": "1000",
+            "latitude": 36.80,
+            "longitude": 10.18,
+            "is_default": True,
+        }
+        res_create = self.client.post("/api/auth/addresses/", payload, format="json")
+        self.assertEqual(res_create.status_code, 201)
+        self.assertEqual(res_create.data["label"], "Maison")
+        self.assertTrue(res_create.data["is_default"])
+
+        res_list = self.client.get("/api/auth/addresses/")
+        self.assertEqual(res_list.status_code, 200)
+        self.assertEqual(len(res_list.data), 1)
+
+
+class ChangePasswordApiTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user("amine", "amine@example.com", PASSWORD, role="client")
+        self.client.force_authenticate(user=self.user)
+
+    def test_change_password_success(self):
+        res = self.client.post(
+            "/api/auth/change-password/",
+            {"old_password": PASSWORD, "new_password": "NewStrongPassw0rd!"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200)
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password("NewStrongPassw0rd!"))
+
+    def test_change_password_wrong_old(self):
+        res = self.client.post(
+            "/api/auth/change-password/",
+            {"old_password": "wrong_password", "new_password": "NewStrongPassw0rd!"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 400)
+
+
+class AdminApiTests(APITestCase):
+    def setUp(self):
+        self.admin = User.objects.create_superuser("admin_test", "adm_test@example.com", PASSWORD)
+        self.client_user = User.objects.create_user("client_test", "cli_test@example.com", PASSWORD, role="client")
+        self.tech_user = User.objects.create_user("tech_test", "tch_test@example.com", PASSWORD, role="technician")
+
+    def test_admin_users_list_forbidden_for_regular_user(self):
+        self.client.force_authenticate(user=self.client_user)
+        res = self.client.get("/api/auth/admin/users/")
+        self.assertEqual(res.status_code, 403)
+
+    def test_admin_users_list_and_filter(self):
+        self.client.force_authenticate(user=self.admin)
+        res = self.client.get("/api/auth/admin/users/")
+        self.assertEqual(res.status_code, 200)
+        self.assertGreaterEqual(len(res.data), 3)
+
+        # Filtre par role client
+        res_clients = self.client.get("/api/auth/admin/users/?role=client")
+        self.assertEqual(res_clients.status_code, 200)
+        for u in res_clients.data:
+            self.assertEqual(u["role"], "client")
+
+    def test_admin_stats(self):
+        self.client.force_authenticate(user=self.admin)
+        res = self.client.get("/api/auth/admin/stats/")
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertIn("total_clients", data)
+        self.assertIn("total_technicians", data)
+        self.assertIn("total_missions", data)
+        self.assertIn("total_categories", data)
+
+

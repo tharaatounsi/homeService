@@ -3,6 +3,7 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 
 import { API_URL } from './config';
+import { MissionInvoiceData, MissionPaymentData, MissionQuoteData } from './user.service';
 
 export interface Category {
   id: number;
@@ -120,6 +121,24 @@ export class TechnicianService {
       latitude: lat,
       longitude: lng,
     });
+  }
+
+  submitQuote(
+    id: number,
+    payload: { labor_price: number; parts_price?: number; description?: string }
+  ): Observable<MissionQuoteData> {
+    return this.http.post<MissionQuoteData>(`${API_URL}/missions/requests/${id}/quote/`, payload);
+  }
+
+  confirmCashPayment(id: number, amount?: number): Observable<any> {
+    return this.http.post<any>(`${API_URL}/missions/requests/${id}/pay/`, {
+      method: 'cash',
+      amount,
+    });
+  }
+
+  getInvoice(id: number): Observable<MissionInvoiceData> {
+    return this.http.get<MissionInvoiceData>(`${API_URL}/missions/requests/${id}/invoice/`);
   }
 }
 

@@ -12,7 +12,7 @@ import {
   TechnicianProfileResponse,
   TechnicianService,
 } from '../../core/technician.service';
-import { UserService } from '../../core/user.service';
+import { MissionInvoiceData, UserService } from '../../core/user.service';
 import { WebSocketService } from '../../core/websocket.service';
 import { MapPickerComponent } from '../../shared/components/map-picker.component';
 import { MessagingTabComponent } from '../../shared/components/messaging-tab.component';
@@ -442,6 +442,19 @@ interface WeekdayOption {
                         <h3 class="mission-title">Mission #{{ m.id }} — {{ m.address || 'Tunis' }}</h3>
                         <p class="mission-desc">{{ m.description }}</p>
 
+                        <!-- Devis sur place établi par Ahmed (Sprint 7) -->
+                        @if (m.quote) {
+                          <div style="margin: 10px 0; padding: 10px 14px; background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 8px; font-size: 12px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+                            <div>
+                              <strong><i class="fa-solid fa-file-invoice-dollar text-primary"></i> Devis : {{ m.quote.total_price }} TND</strong>
+                              <span style="color: #64748b; margin-left: 8px;">(MO: {{ m.quote.labor_price }} TND, Pièces: {{ m.quote.parts_price }} TND)</span>
+                            </div>
+                            <span style="padding: 3px 8px; border-radius: 6px; font-weight: 700;" [style.background]="m.quote.status === 'accepted' ? '#dcfce7' : (m.quote.status === 'rejected' ? '#fee2e2' : '#fef3c7')" [style.color]="m.quote.status === 'accepted' ? '#166534' : (m.quote.status === 'rejected' ? '#991b1b' : '#92400e')">
+                              {{ m.quote.status === 'accepted' ? 'Accepté par Molka' : (m.quote.status === 'rejected' ? 'Refusé' : 'En attente client') }}
+                            </span>
+                          </div>
+                        }
+
                         <div class="mission-footer" style="flex-wrap: wrap; gap: 10px;">
                           <div class="client-meta" style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px;">
                             <span><i class="fa-regular fa-user"></i> Client : <strong>{{ m.client_name || '#' + m.client }}</strong></span>
@@ -457,7 +470,7 @@ interface WeekdayOption {
                             }
                           </div>
 
-                          <div class="action-btns" style="display: flex; gap: 8px; flex-wrap: wrap;">
+                          <div class="action-btns" style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
                             <button
                               type="button"
                               (click)="openClientChat(m)"
@@ -486,6 +499,13 @@ interface WeekdayOption {
                             @if (m.status === 'in_progress') {
                               <button
                                 type="button"
+                                (click)="openQuoteModal(m)"
+                                style="display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; background: #6366f1; color: #fff; border: none; border-radius: 8px; font-weight: 700; cursor: pointer;"
+                              >
+                                <i class="fa-solid fa-file-invoice-dollar"></i> {{ m.quote ? 'Modifier le devis' : 'Établir devis' }}
+                              </button>
+                              <button
+                                type="button"
                                 (click)="advanceMissionStatus(m.id, 'completed')"
                                 style="display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; background: #16a34a; color: #fff; border: none; border-radius: 8px; font-weight: 700; cursor: pointer;"
                               >
@@ -493,9 +513,28 @@ interface WeekdayOption {
                               </button>
                             }
                             @if (m.status === 'completed') {
-                              <span style="display: inline-flex; align-items: center; gap: 6px; font-weight: 700; color: #16a34a; font-size: 13px;">
-                                <i class="fa-solid fa-check-double"></i> Mission accomplie avec succès
+                              <button
+                                type="button"
+                                (click)="confirmCashReceipt(m)"
+                                style="display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; background: #059669; color: #fff; border: none; border-radius: 8px; font-weight: 700; cursor: pointer;"
+                              >
+                                <i class="fa-solid fa-hand-holding-dollar"></i> Confirmer règlement espèces
+                              </button>
+                              <span style="display: inline-flex; align-items: center; gap: 6px; font-weight: 700; color: #854d0e; font-size: 13px; background: #fef9c3; padding: 4px 10px; border-radius: 6px;">
+                                <i class="fa-solid fa-hourglass-half"></i> En attente du règlement
                               </span>
+                            }
+                            @if (m.status === 'paid') {
+                              <span style="display: inline-flex; align-items: center; gap: 6px; font-weight: 700; color: #16a34a; font-size: 13px;">
+                                <i class="fa-solid fa-circle-check"></i> Clôturée & Payée ({{ m.payment?.method === 'cash' ? '💵 Espèces' : '💳 En ligne' }})
+                              </span>
+                              <button
+                                type="button"
+                                (click)="openInvoice(m.id)"
+                                style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; background: #0f172a; color: #fff; border: none; border-radius: 8px; font-weight: 700; cursor: pointer; font-size: 12px;"
+                              >
+                                <i class="fa-solid fa-receipt"></i> Voir Facture
+                              </button>
                             }
                           </div>
                         </div>
@@ -544,6 +583,121 @@ interface WeekdayOption {
             }
           </div>
         </div>
+
+        <!-- Modal Établissement Devis (Sprint 7) -->
+        @if (quotingMission()) {
+          <div class="modal-backdrop" (click)="quotingMission.set(null)" style="position: fixed; inset: 0; background: rgba(15,23,42,0.6); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 20px;">
+            <div class="modal-card" (click)="$event.stopPropagation()" style="background: #fff; border-radius: 16px; width: 100%; max-width: 480px; padding: 24px; box-shadow: 0 20px 40px rgba(0,0,0,0.2);">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; border-bottom: 1px solid #f1f5f9; padding-bottom: 12px;">
+                <h3 style="margin: 0; font-size: 17px; font-weight: 800; color: #0f172a;">
+                  <i class="fa-solid fa-file-invoice-dollar text-primary"></i> Devis pour Mission #{{ quotingMission()!.id }}
+                </h3>
+                <button type="button" (click)="quotingMission.set(null)" style="background: #f1f5f9; border: none; width: 30px; height: 30px; border-radius: 50%; cursor: pointer;">
+                  <i class="fa-solid fa-xmark"></i>
+                </button>
+              </div>
+
+              <div style="display: flex; flex-direction: column; gap: 14px;">
+                <div>
+                  <label style="display: block; font-size: 11px; font-weight: 700; color: #475569; text-transform: uppercase; margin-bottom: 4px;">Main d'œuvre (TND)</label>
+                  <input type="number" [(ngModel)]="quoteForm.labor_price" style="width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px; box-sizing: border-box;" />
+                </div>
+                <div>
+                  <label style="display: block; font-size: 11px; font-weight: 700; color: #475569; text-transform: uppercase; margin-bottom: 4px;">Pièces et fournitures (TND)</label>
+                  <input type="number" [(ngModel)]="quoteForm.parts_price" style="width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px; box-sizing: border-box;" />
+                </div>
+                <div>
+                  <label style="display: block; font-size: 11px; font-weight: 700; color: #475569; text-transform: uppercase; margin-bottom: 4px;">Détails & description des travaux</label>
+                  <textarea [(ngModel)]="quoteForm.description" rows="3" placeholder="Remplacement joint, flexible ou pièces..." style="width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 13px; box-sizing: border-box;"></textarea>
+                </div>
+
+                <div style="padding: 12px; background: #eff6ff; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; font-weight: 800; font-size: 15px; color: #1e40af;">
+                  <span>Montant Total du Devis :</span>
+                  <span>{{ (+quoteForm.labor_price || 0) + (+quoteForm.parts_price || 0) }} TND</span>
+                </div>
+              </div>
+
+              <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
+                <button type="button" (click)="quotingMission.set(null)" style="padding: 9px 16px; background: #f1f5f9; color: #64748b; border: 1px solid #cbd5e1; border-radius: 8px; font-weight: 700; cursor: pointer;">
+                  Annuler
+                </button>
+                <button type="button" (click)="submitQuote()" style="padding: 9px 20px; background: #2563eb; color: #fff; border: none; border-radius: 8px; font-weight: 800; cursor: pointer;">
+                  Transmettre au client
+                </button>
+              </div>
+            </div>
+          </div>
+        }
+
+        <!-- Modal Facture d'intervention (Sprint 7) -->
+        @if (activeInvoice()) {
+          <div class="modal-backdrop" (click)="activeInvoice.set(null)" style="position: fixed; inset: 0; background: rgba(15,23,42,0.6); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 20px;">
+            <div class="modal-card" (click)="$event.stopPropagation()" style="background: #fff; border-radius: 16px; width: 100%; max-width: 620px; padding: 24px; box-shadow: 0 20px 40px rgba(0,0,0,0.2); max-height: 90vh; overflow-y: auto;">
+              <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #e2e8f0; padding-bottom: 12px; margin-bottom: 16px;">
+                <div>
+                  <h3 style="margin: 0; font-size: 18px; font-weight: 800; color: #0f172a;">Facture {{ activeInvoice()!.invoice_number }}</h3>
+                  <small style="color: #64748b;">Règlement certifié ServiceHome</small>
+                </div>
+                <button type="button" (click)="activeInvoice.set(null)" style="background: #f1f5f9; border: none; width: 30px; height: 30px; border-radius: 50%; cursor: pointer;">
+                  <i class="fa-solid fa-xmark"></i>
+                </button>
+              </div>
+
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; background: #f8fafc; padding: 14px; border-radius: 10px; margin-bottom: 16px; font-size: 12px;">
+                <div>
+                  <span style="color: #64748b; font-weight: 700; text-transform: uppercase; font-size: 10px;">Client</span>
+                  <div style="font-size: 14px; font-weight: 800; color: #0f172a;">{{ activeInvoice()!.client.name }}</div>
+                  <div>{{ activeInvoice()!.client.email }}</div>
+                  <div>{{ activeInvoice()!.address }}</div>
+                </div>
+                <div>
+                  <span style="color: #64748b; font-weight: 700; text-transform: uppercase; font-size: 10px;">Intervention</span>
+                  <div style="font-size: 14px; font-weight: 800; color: #0f172a;">{{ activeInvoice()!.category_name }}</div>
+                  <div>Mode : {{ activeInvoice()!.payment_method }}</div>
+                  <div>Réf : <code>{{ activeInvoice()!.transaction_id || 'N/A' }}</code></div>
+                </div>
+              </div>
+
+              <table style="width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 16px;">
+                <thead>
+                  <tr style="background: #f1f5f9; text-align: left;">
+                    <th style="padding: 8px 12px;">Prestation</th>
+                    <th style="padding: 8px 12px; text-align: right;">Montant</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (it of activeInvoice()!.items; track it.label) {
+                    <tr style="border-bottom: 1px solid #f1f5f9;">
+                      <td style="padding: 10px 12px;">{{ it.label }}</td>
+                      <td style="padding: 10px 12px; text-align: right; font-weight: 700;">{{ it.amount | number: '1.2-2' }} TND</td>
+                    </tr>
+                  }
+                  <tr style="border-top: 2px solid #0f172a; font-weight: 800; font-size: 15px; background: #f8fafc;">
+                    <td style="padding: 12px;">Total encaissé</td>
+                    <td style="padding: 12px; text-align: right; color: #16a34a;">{{ activeInvoice()!.total_amount | number: '1.2-2' }} TND</td>
+                  </tr>
+                  <tr style="font-size: 12px; color: #475569;">
+                    <td style="padding: 8px 12px;">Commission plateforme (10%)</td>
+                    <td style="padding: 8px 12px; text-align: right;">- {{ activeInvoice()!.platform_fee | number: '1.2-2' }} TND</td>
+                  </tr>
+                  <tr style="font-size: 13px; font-weight: 800; color: #1e40af; background: #eff6ff;">
+                    <td style="padding: 8px 12px;">Net Prestataire (90%)</td>
+                    <td style="padding: 8px 12px; text-align: right;">{{ activeInvoice()!.technician_net | number: '1.2-2' }} TND</td>
+                  </tr>
+                </tbody>
+              </table>
+
+              <div style="display: flex; justify-content: flex-end; gap: 10px;">
+                <button type="button" (click)="activeInvoice.set(null)" style="padding: 8px 16px; background: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 8px; font-weight: 700; cursor: pointer;">
+                  Fermer
+                </button>
+                <button type="button" (click)="printInvoice()" style="padding: 8px 18px; background: #0f172a; color: #fff; border: none; border-radius: 8px; font-weight: 700; cursor: pointer;">
+                  <i class="fa-solid fa-print"></i> Imprimer
+                </button>
+              </div>
+            </div>
+          </div>
+        }
       </main>
     </div>
   `,
@@ -1150,6 +1304,15 @@ export class TechnicianDashboardComponent implements OnInit, OnDestroy {
   selectedClientId = signal<number | null>(null);
   selectedMissionId = signal<number | null>(null);
 
+  // Devis et Facture (Sprint 7)
+  quotingMission = signal<any | null>(null);
+  quoteForm = {
+    labor_price: 45,
+    parts_price: 35,
+    description: '',
+  };
+  activeInvoice = signal<MissionInvoiceData | null>(null);
+
   activeTab = signal<TechTab>('missions');
   isSubmitting = signal<boolean>(false);
   toastMessage = signal<string | null>(null);
@@ -1458,6 +1621,70 @@ export class TechnicianDashboardComponent implements OnInit, OnDestroy {
   declineMission(id: number): void {
     this.availableMissions.update((list) => list.filter((m) => m.id !== id));
     this.showToast(`Mission #${id} retirée de la liste.`);
+  }
+
+  // --- SPRINT 7: DEVIS, RÈGLEMENT & FACTURATION ---
+  openQuoteModal(m: any): void {
+    this.quotingMission.set(m);
+    if (m.quote) {
+      this.quoteForm.labor_price = Number(m.quote.labor_price) || 0;
+      this.quoteForm.parts_price = Number(m.quote.parts_price) || 0;
+      this.quoteForm.description = m.quote.description || '';
+    } else {
+      this.quoteForm.labor_price = 45;
+      this.quoteForm.parts_price = 35;
+      this.quoteForm.description = 'Diagnostic sur place & réparation';
+    }
+  }
+
+  submitQuote(): void {
+    const m = this.quotingMission();
+    if (!m) return;
+
+    this.techService.submitQuote(m.id, {
+      labor_price: Number(this.quoteForm.labor_price) || 0,
+      parts_price: Number(this.quoteForm.parts_price) || 0,
+      description: this.quoteForm.description,
+    }).subscribe({
+      next: (quote) => {
+        this.quotingMission.set(null);
+        this.showToast(`Devis de ${quote.total_price} TND transmis au client avec succès !`);
+        this.loadMissions();
+      },
+      error: (err) => {
+        this.showToast(err?.error?.detail || 'Erreur lors de la transmission du devis.', true);
+      },
+    });
+  }
+
+  confirmCashReceipt(m: any): void {
+    const total = m.quote ? Number(m.quote.total_price) : (Number(m.estimated_price) || 50);
+    if (!confirm(`Confirmez-vous avoir reçu ${total} TND en espèces de la part du client ?`)) return;
+
+    this.techService.confirmCashPayment(m.id, total).subscribe({
+      next: () => {
+        this.showToast(`Règlement en espèces de ${total} TND confirmé ! Mission clôturée.`);
+        this.loadMissions();
+      },
+      error: (err) => {
+        this.showToast(err?.error?.detail || 'Erreur lors de la confirmation du paiement.', true);
+      },
+    });
+  }
+
+  openInvoice(missionId: number): void {
+    this.techService.getInvoice(missionId).subscribe({
+      next: (inv) => {
+        this.activeInvoice.set(inv);
+      },
+      error: () => {
+        this.showToast('Impossible de récupérer la facture.', true);
+      },
+    });
+  }
+
+  printInvoice(): void {
+    window.print();
   }
 
   getStatusBadgeLabel(status: string): string {

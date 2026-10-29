@@ -3,6 +3,7 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 
 import { API_URL } from './config';
+import { MissionInvoiceData, MissionPaymentData, MissionQuoteData } from './user.service';
 
 export interface AdminTechnicianItem {
   id: number;
@@ -68,6 +69,8 @@ export interface AdminMissionItem {
   created_at: string;
   updated_at?: string;
   events?: any[];
+  quote?: MissionQuoteData;
+  payment?: MissionPaymentData;
 }
 
 export interface AdminCategoryItem {
@@ -121,5 +124,9 @@ export class AdminService {
 
   getCategories(): Observable<AdminCategoryItem[]> {
     return this.http.get<AdminCategoryItem[]>(`${API_URL}/catalog/categories/`);
+  }
+
+  getInvoice(id: number): Observable<MissionInvoiceData> {
+    return this.http.get<MissionInvoiceData>(`${API_URL}/missions/requests/${id}/invoice/`);
   }
 }

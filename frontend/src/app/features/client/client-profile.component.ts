@@ -691,6 +691,8 @@ export class ClientProfileComponent implements OnInit, OnDestroy {
           longitude: item.lng ?? item.longitude,
           price: item.estimated_price ? parseFloat(item.estimated_price) : undefined,
           events: item.events || [],
+          quote: item.quote,
+          payment: item.payment,
         }));
         this.requests.set(mapped);
         this.isLoadingRequests.set(false);

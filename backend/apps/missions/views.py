@@ -1,6 +1,6 @@
 from django.db import connection, models
 from django.shortcuts import get_object_or_404
-from .realtime import notify_new_request
+from .realtime import notify_new_request, notify_status
 from rest_framework import generics, permissions, status
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
@@ -9,10 +9,18 @@ from rest_framework.response import Response
 from apps.accounts.models import User
 from apps.accounts.permissions import IsTechnician
 
-from .models import MissionMessage, ServiceRequest
+from .models import (
+    MissionMessage,
+    MissionPayment,
+    MissionQuote,
+    RequestStatusEvent,
+    ServiceRequest,
+)
 from .serializers import (
     MatchedTechnicianSerializer,
     MissionMessageSerializer,
+    MissionPaymentSerializer,
+    MissionQuoteSerializer,
     ServiceRequestSerializer,
     StatusTransitionSerializer,
 )
@@ -544,6 +552,289 @@ class ServiceRequestTrackingView(generics.GenericAPIView):
             "eta_minutes": eta_min,
             "is_en_route": service_request.status == ServiceRequest.Status.EN_ROUTE,
         })
+
+
+class ServiceRequestQuoteView(generics.GenericAPIView):
+    """
+    Gestion du devis (diagnostic sur place) par le technicien assigné.
+    GET : Récupère le devis actuel.
+    POST : Établit ou met à jour le devis (main d'œuvre + pièces).
+    """
+    permission_classes = [permissions.IsAuthenticated]
+    queryset = ServiceRequest.objects.all()
+
+    def get(self, request, pk=None):
+        service_request = self.get_object()
+        quote = getattr(service_request, "quote", None)
+        if not quote:
+            return Response({"detail": "Aucun devis établi pour cette mission."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(MissionQuoteSerializer(quote).data)
+
+    def post(self, request, pk=None):
+        service_request = self.get_object()
+        user = request.user
+        is_assigned_tech = (service_request.technician_id == user.id)
+        is_admin = getattr(user, "role", "") == "admin" or user.is_staff
+
+        if not (is_assigned_tech or is_admin):
+            raise PermissionDenied("Seul le technicien assigné à cette mission peut établir le devis.")
+
+        if service_request.status not in [
+            ServiceRequest.Status.ACCEPTED,
+            ServiceRequest.Status.EN_ROUTE,
+            ServiceRequest.Status.IN_PROGRESS,
+            ServiceRequest.Status.COMPLETED,
+        ]:
+            raise ValidationError({"detail": f"Impossible d'établir un devis au statut '{service_request.status}'."})
+
+        labor_price = request.data.get("labor_price")
+        parts_price = request.data.get("parts_price", 0)
+        description = (request.data.get("description") or "").strip()
+
+        try:
+            labor_val = round(float(labor_price), 2)
+            parts_val = round(float(parts_price or 0), 2)
+            if labor_val < 0 or parts_val < 0:
+                raise ValueError()
+        except (TypeError, ValueError):
+            raise ValidationError({"detail": "Montants invalides pour la main d'œuvre ou les pièces."})
+
+        quote, created = MissionQuote.objects.get_or_create(
+            request=service_request,
+            defaults={
+                "labor_price": labor_val,
+                "parts_price": parts_val,
+                "total_price": labor_val + parts_val,
+                "description": description,
+                "status": MissionQuote.Status.PENDING,
+            },
+        )
+        if not created:
+            quote.labor_price = labor_val
+            quote.parts_price = parts_val
+            quote.total_price = labor_val + parts_val
+            quote.description = description
+            quote.status = MissionQuote.Status.PENDING
+            quote.save()
+
+        # Met à jour le prix estimé de la demande pour cohérence globale
+        service_request.estimated_price = quote.total_price
+        service_request.save(update_fields=["estimated_price", "updated_at"])
+
+        RequestStatusEvent.objects.create(
+            request=service_request,
+            from_status=service_request.status,
+            to_status=service_request.status,
+            actor=user,
+            note=f"Devis établi : {quote.total_price} TND (MO: {quote.labor_price} TND, Pièces: {quote.parts_price} TND)",
+        )
+        notify_status(service_request)
+
+        return Response(MissionQuoteSerializer(quote).data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+
+class ServiceRequestQuoteRespondView(generics.GenericAPIView):
+    """
+    Réponse du client au devis établi par le technicien (acceptation ou refus).
+    """
+    permission_classes = [permissions.IsAuthenticated]
+    queryset = ServiceRequest.objects.all()
+
+    def post(self, request, pk=None):
+        service_request = self.get_object()
+        user = request.user
+        is_client = (service_request.client_id == user.id)
+        is_admin = getattr(user, "role", "") == "admin" or user.is_staff
+
+        if not (is_client or is_admin):
+            raise PermissionDenied("Seul le client peut accepter ou refuser le devis.")
+
+        quote = getattr(service_request, "quote", None)
+        if not quote:
+            raise ValidationError({"detail": "Aucun devis n'a été établi pour cette mission."})
+
+        action = request.data.get("action")
+        if action == "accept":
+            quote.status = MissionQuote.Status.ACCEPTED
+            note = f"Devis accepté par le client ({quote.total_price} TND)"
+        elif action == "reject":
+            quote.status = MissionQuote.Status.REJECTED
+            note = "Devis refusé par le client"
+        else:
+            raise ValidationError({"detail": "Action invalide. Utilisez 'accept' ou 'reject'."})
+
+        quote.save(update_fields=["status", "updated_at"])
+        RequestStatusEvent.objects.create(
+            request=service_request,
+            from_status=service_request.status,
+            to_status=service_request.status,
+            actor=user,
+            note=note,
+        )
+        notify_status(service_request)
+
+        return Response(MissionQuoteSerializer(quote).data)
+
+
+class ServiceRequestPayView(generics.GenericAPIView):
+    """
+    Règlement hybride de la mission (Espèces sur place ou En ligne Carte Bancaire/Konnect).
+    Met à jour le statut vers 'paid', calcule automatiquement les 10% de commission
+    et 90% pour le technicien, et enregistre l'événement d'audit.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+    queryset = ServiceRequest.objects.all()
+
+    def post(self, request, pk=None):
+        service_request = self.get_object()
+        user = request.user
+        is_client = (service_request.client_id == user.id)
+        is_tech = (service_request.technician_id == user.id)
+        is_admin = getattr(user, "role", "") == "admin" or user.is_staff
+
+        if not (is_client or is_tech or is_admin):
+            raise PermissionDenied("Vous n'êtes pas autorisé à régler cette mission.")
+
+        if service_request.status not in [ServiceRequest.Status.IN_PROGRESS, ServiceRequest.Status.COMPLETED]:
+            raise ValidationError({"detail": f"Impossible de régler une mission avec le statut '{service_request.status}'."})
+
+        method = request.data.get("method", MissionPayment.Method.ONLINE)
+        if method not in [MissionPayment.Method.CASH, MissionPayment.Method.ONLINE]:
+            method = MissionPayment.Method.ONLINE
+
+        amount = request.data.get("amount")
+        if not amount:
+            quote = getattr(service_request, "quote", None)
+            if quote and quote.total_price:
+                amount = quote.total_price
+            elif service_request.estimated_price:
+                amount = service_request.estimated_price
+            else:
+                amount = 50.00
+
+        try:
+            amount_val = round(float(amount), 2)
+            if amount_val <= 0:
+                raise ValueError()
+        except (TypeError, ValueError):
+            raise ValidationError({"detail": "Le montant du paiement est invalide."})
+
+        card_last4 = str(request.data.get("card_last4") or ("CASH" if method == MissionPayment.Method.CASH else "4242"))[:4]
+
+        # Commission plateforme 10%, Part technicien 90%
+        fee = round(amount_val * 0.10, 2)
+        tech_net = round(amount_val - fee, 2)
+
+        import uuid
+        txn_id = f"TXN-SH-{uuid.uuid4().hex[:10].upper()}"
+
+        payment, _ = MissionPayment.objects.update_or_create(
+            request=service_request,
+            defaults={
+                "method": method,
+                "amount": amount_val,
+                "platform_fee": fee,
+                "technician_amount": tech_net,
+                "transaction_id": txn_id,
+                "card_last4": card_last4,
+                "status": MissionPayment.Status.COMPLETED,
+            },
+        )
+
+        old_status = service_request.status
+        service_request.status = ServiceRequest.Status.PAID
+        service_request.save(update_fields=["status", "updated_at"])
+
+        method_label = "Espèces (sur place)" if method == MissionPayment.Method.CASH else "Carte Bancaire / En ligne"
+        RequestStatusEvent.objects.create(
+            request=service_request,
+            from_status=old_status,
+            to_status=ServiceRequest.Status.PAID,
+            actor=user,
+            note=f"Règlement effectué ({method_label}) : {amount_val} TND (Réf: {payment.transaction_id}, Com. 10%: {fee} TND)",
+        )
+        notify_status(service_request)
+
+        return Response({
+            "success": True,
+            "payment": MissionPaymentSerializer(payment).data,
+            "request": ServiceRequestSerializer(service_request, context={"request": request}).data,
+        })
+
+
+class ServiceRequestInvoiceView(generics.GenericAPIView):
+    """
+    Génération et consultation de la facture officielle d'intervention.
+    Accessible par le client, le technicien assigné et l'administrateur.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+    queryset = ServiceRequest.objects.all()
+
+    def get(self, request, pk=None):
+        service_request = self.get_object()
+        user = request.user
+        is_client = (service_request.client_id == user.id)
+        is_tech = (service_request.technician_id == user.id)
+        is_admin = getattr(user, "role", "") == "admin" or user.is_staff
+
+        if not (is_client or is_tech or is_admin):
+            raise PermissionDenied("Vous n'êtes pas autorisé à consulter la facture de cette mission.")
+
+        payment = getattr(service_request, "payment", None)
+        quote = getattr(service_request, "quote", None)
+
+        total_amount = float(payment.amount) if payment else (float(quote.total_price) if quote else float(service_request.estimated_price or 0))
+        platform_fee = float(payment.platform_fee) if payment else round(total_amount * 0.10, 2)
+        technician_net = float(payment.technician_amount) if payment else round(total_amount - platform_fee, 2)
+
+        items = []
+        if quote:
+            items.append({
+                "label": f"Main d'œuvre & diagnostic ({service_request.category.name if service_request.category else 'Service'})",
+                "amount": float(quote.labor_price),
+            })
+            if quote.parts_price and float(quote.parts_price) > 0:
+                items.append({
+                    "label": f"Fournitures / pièces ({quote.description or 'Matériel'})",
+                    "amount": float(quote.parts_price),
+                })
+        else:
+            items.append({
+                "label": f"Intervention ({service_request.category.name if service_request.category else 'Service'})",
+                "amount": total_amount,
+            })
+
+        invoice_data = {
+            "invoice_number": f"FAC-{service_request.id:05d}",
+            "invoice_date": payment.paid_at.isoformat() if payment else service_request.updated_at.isoformat(),
+            "request_id": service_request.id,
+            "category_name": service_request.category.name if service_request.category else "Intervention",
+            "description": service_request.description,
+            "address": service_request.address or "Tunis",
+            "client": {
+                "id": service_request.client.id,
+                "name": service_request.client.username,
+                "email": service_request.client.email,
+                "phone": service_request.client.phone or "",
+            },
+            "technician": {
+                "id": service_request.technician.id if service_request.technician else None,
+                "name": service_request.technician.username if service_request.technician else "Non assigné",
+                "email": service_request.technician.email if service_request.technician else "",
+                "phone": service_request.technician.phone or "" if service_request.technician else "",
+            },
+            "items": items,
+            "total_amount": total_amount,
+            "platform_fee": platform_fee,
+            "technician_net": technician_net,
+            "payment_method": payment.get_method_display() if payment else "Non réglé",
+            "payment_method_code": payment.method if payment else None,
+            "payment_status": payment.status if payment else "pending",
+            "transaction_id": payment.transaction_id if payment else None,
+            "card_last4": payment.card_last4 if payment else None,
+            "is_paid": service_request.status == ServiceRequest.Status.PAID,
+        }
+        return Response(invoice_data)
 
 
 

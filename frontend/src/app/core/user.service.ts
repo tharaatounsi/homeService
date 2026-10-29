@@ -27,6 +27,51 @@ export interface ChangePasswordPayload {
   new_password_confirm: string;
 }
 
+export interface MissionQuoteData {
+  id: number;
+  request: number;
+  labor_price: number | string;
+  parts_price: number | string;
+  total_price: number | string;
+  description: string;
+  status: 'pending' | 'accepted' | 'rejected';
+  created_at?: string;
+}
+
+export interface MissionPaymentData {
+  id: number;
+  request: number;
+  method: 'cash' | 'online';
+  amount: number | string;
+  platform_fee: number | string;
+  technician_amount: number | string;
+  transaction_id: string;
+  card_last4?: string;
+  status: 'completed' | 'pending' | 'failed';
+  paid_at: string;
+}
+
+export interface MissionInvoiceData {
+  invoice_number: string;
+  invoice_date: string;
+  request_id: number;
+  category_name: string;
+  description: string;
+  address: string;
+  client: { id: number; name: string; email: string; phone: string };
+  technician: { id: number | null; name: string; email: string; phone: string };
+  items: { label: string; amount: number }[];
+  total_amount: number;
+  platform_fee: number;
+  technician_net: number;
+  payment_method: string;
+  payment_method_code?: 'cash' | 'online';
+  payment_status: string;
+  transaction_id?: string;
+  card_last4?: string;
+  is_paid: boolean;
+}
+
 export interface ClientServiceRequestSummary {
   id: number;
   categoryName: string;
@@ -47,6 +92,8 @@ export interface ClientServiceRequestSummary {
   distanceKm?: number;
   photos?: string[];
   events?: any[];
+  quote?: MissionQuoteData;
+  payment?: MissionPaymentData;
 }
 
 export interface MissionMessageItem {
@@ -219,6 +266,27 @@ export class UserService {
 
   getMissionTracking(requestId: number): Observable<MissionTrackingData> {
     return this.http.get<MissionTrackingData>(`${API_URL}/missions/requests/${requestId}/tracking/`);
+  }
+
+  getQuote(requestId: number): Observable<MissionQuoteData> {
+    return this.http.get<MissionQuoteData>(`${API_URL}/missions/requests/${requestId}/quote/`);
+  }
+
+  respondQuote(requestId: number, action: 'accept' | 'reject'): Observable<MissionQuoteData> {
+    return this.http.post<MissionQuoteData>(`${API_URL}/missions/requests/${requestId}/quote/respond/`, {
+      action,
+    });
+  }
+
+  payMission(
+    requestId: number,
+    payload: { method: 'cash' | 'online'; amount?: number; card_last4?: string }
+  ): Observable<any> {
+    return this.http.post<any>(`${API_URL}/missions/requests/${requestId}/pay/`, payload);
+  }
+
+  getInvoice(requestId: number): Observable<MissionInvoiceData> {
+    return this.http.get<MissionInvoiceData>(`${API_URL}/missions/requests/${requestId}/invoice/`);
   }
 }
 

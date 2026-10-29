@@ -599,6 +599,92 @@ class ClientTechnicianMessagingTests(APITestCase):
         self.assertEqual(res_track.data["technician_lat"], 36.8200)
         self.assertEqual(res_track.data["technician_lng"], 10.1900)
 
+    def test_sprint7_quote_hybrid_payment_and_invoice(self):
+        """
+        Sprint 7 : Devis sur place, Acceptation client, Règlement hybride (En ligne / Espèces)
+        avec commission plateforme 10%, et génération de facture officielle.
+        """
+        # 1. Création et acceptation de la mission
+        self.client.force_authenticate(user=self.client_user)
+        res_create = self.client.post(
+            "/api/missions/requests/",
+            {
+                "category": self.category.id,
+                "description": "Changement robinet mitigeur cuisine",
+                "address": "La Marsa, Tunis",
+                "latitude": 36.8780,
+                "longitude": 10.3247,
+            },
+            format="json",
+        )
+        self.assertEqual(res_create.status_code, status.HTTP_201_CREATED)
+        req_id = res_create.data["id"]
+
+        self.client.force_authenticate(user=self.tech_user)
+        self.client.post(f"/api/missions/requests/{req_id}/accept/")
+        self.client.post(f"/api/missions/requests/{req_id}/status/", {"status": "en_route"}, format="json")
+        self.client.post(f"/api/missions/requests/{req_id}/status/", {"status": "in_progress"}, format="json")
+
+        # 2. Ahmed établit un devis sur place (MO: 45 TND, Pièces: 35 TND -> Total 80 TND)
+        res_quote = self.client.post(
+            f"/api/missions/requests/{req_id}/quote/",
+            {
+                "labor_price": "45.00",
+                "parts_price": "35.00",
+                "description": "Remplacement cartouche mitigeur et flexible inox",
+            },
+            format="json",
+        )
+        self.assertEqual(res_quote.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(float(res_quote.data["total_price"]), 80.00)
+        self.assertEqual(res_quote.data["status"], "pending")
+
+        # 3. Molka consulte et accepte le devis
+        self.client.force_authenticate(user=self.client_user)
+        res_respond = self.client.post(
+            f"/api/missions/requests/{req_id}/quote/respond/",
+            {"action": "accept"},
+            format="json",
+        )
+        self.assertEqual(res_respond.status_code, status.HTTP_200_OK)
+        self.assertEqual(res_respond.data["status"], "accepted")
+
+        # 4. Ahmed termine l'intervention
+        self.client.force_authenticate(user=self.tech_user)
+        self.client.post(f"/api/missions/requests/{req_id}/status/", {"status": "completed"}, format="json")
+
+        # 5. Molka procède au règlement en ligne (Mock CB / Konnect)
+        self.client.force_authenticate(user=self.client_user)
+        res_pay = self.client.post(
+            f"/api/missions/requests/{req_id}/pay/",
+            {
+                "method": "online",
+                "amount": "80.00",
+                "card_last4": "4242",
+            },
+            format="json",
+        )
+        self.assertEqual(res_pay.status_code, status.HTTP_200_OK)
+        self.assertTrue(res_pay.data["success"])
+        payment = res_pay.data["payment"]
+        self.assertEqual(payment["method"], "online")
+        self.assertEqual(float(payment["amount"]), 80.00)
+        # 10% commission = 8.00 TND, 90% technicien = 72.00 TND
+        self.assertEqual(float(payment["platform_fee"]), 8.00)
+        self.assertEqual(float(payment["technician_amount"]), 72.00)
+        self.assertTrue(payment["transaction_id"].startswith("TXN-SH-"))
+        self.assertEqual(res_pay.data["request"]["status"], "paid")
+
+        # 6. Consultation de la facture officielle
+        res_inv = self.client.get(f"/api/missions/requests/{req_id}/invoice/")
+        self.assertEqual(res_inv.status_code, status.HTTP_200_OK)
+        self.assertEqual(res_inv.data["invoice_number"], f"FAC-{req_id:05d}")
+        self.assertEqual(res_inv.data["total_amount"], 80.00)
+        self.assertEqual(res_inv.data["platform_fee"], 8.00)
+        self.assertEqual(res_inv.data["technician_net"], 72.00)
+        self.assertTrue(res_inv.data["is_paid"])
+        self.assertEqual(len(res_inv.data["items"]), 2)
+
 
 
 

@@ -412,6 +412,58 @@ type MissionFilter = 'all' | 'pending' | 'in_progress' | 'completed' | 'cancelle
                       <p>{{ selectedMission()!.description }}</p>
                     </div>
 
+                    <!-- Détails Financiers & Règlement (Sprint 7) -->
+                    <div class="modal-financial-box" style="margin-top: 16px; padding: 16px; background: #f8fafc; border-radius: 12px; border: 1px solid #e2e8f0;">
+                      <h4 style="margin: 0 0 12px; font-size: 14px; font-weight: 800; color: #0f172a; display: flex; align-items: center; gap: 8px;">
+                        <i class="fa-solid fa-coins" style="color: #10b981;"></i> Détails Financiers & Encaissement (Sprint 7)
+                      </h4>
+
+                      @if (selectedMission()!.payment) {
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 12px;">
+                          <div style="background: #ffffff; padding: 10px; border-radius: 8px; border: 1px solid #e2e8f0;">
+                            <span style="font-size: 10px; text-transform: uppercase; color: #64748b; font-weight: 700; display: block;">Mode de Règlement</span>
+                            <strong style="color: #0f172a; font-size: 13px;">
+                              {{ selectedMission()!.payment!.method === 'cash' ? '💵 Espèces (sur place)' : '💳 En ligne (CB / Konnect)' }}
+                            </strong>
+                          </div>
+                          <div style="background: #ffffff; padding: 10px; border-radius: 8px; border: 1px solid #e2e8f0;">
+                            <span style="font-size: 10px; text-transform: uppercase; color: #64748b; font-weight: 700; display: block;">Montant Total TTC</span>
+                            <strong style="color: #16a34a; font-size: 15px;">{{ selectedMission()!.payment!.amount }} TND</strong>
+                          </div>
+                          <div style="background: #ffffff; padding: 10px; border-radius: 8px; border: 1px solid #e2e8f0;">
+                            <span style="font-size: 10px; text-transform: uppercase; color: #64748b; font-weight: 700; display: block;">Com. Plateforme (10%)</span>
+                            <strong style="color: #2563eb; font-size: 14px;">{{ selectedMission()!.payment!.platform_fee }} TND</strong>
+                          </div>
+                          <div style="background: #ffffff; padding: 10px; border-radius: 8px; border: 1px solid #e2e8f0;">
+                            <span style="font-size: 10px; text-transform: uppercase; color: #64748b; font-weight: 700; display: block;">Net Prestataire (90%)</span>
+                            <strong style="color: #0f172a; font-size: 14px;">{{ selectedMission()!.payment!.technician_amount }} TND</strong>
+                          </div>
+                        </div>
+
+                        <div style="font-size: 12px; color: #64748b; display: flex; flex-wrap: wrap; gap: 16px; border-top: 1px dashed #e2e8f0; padding-top: 8px;">
+                          <span>Réf transaction : <code>{{ selectedMission()!.payment!.transaction_id }}</code></span>
+                          @if (selectedMission()!.payment!.card_last4 && selectedMission()!.payment!.card_last4 !== 'CASH') {
+                            <span>Carte : <code>•••• •••• •••• {{ selectedMission()!.payment!.card_last4 }}</code></span>
+                          }
+                          <span>Date règlement : {{ selectedMission()!.payment!.paid_at | date: 'dd/MM/yyyy HH:mm' }}</span>
+                        </div>
+                      } @else if (selectedMission()!.quote) {
+                        <div style="background: #fff; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0; font-size: 13px;">
+                          <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+                            <span>Devis établi sur place par le technicien :</span>
+                            <strong style="color: #0f172a;">{{ selectedMission()!.quote!.total_price }} TND</strong>
+                          </div>
+                          <div style="font-size: 12px; color: #64748b;">
+                            MO: {{ selectedMission()!.quote!.labor_price }} TND | Pièces: {{ selectedMission()!.quote!.parts_price }} TND | Statut: {{ selectedMission()!.quote!.status }}
+                          </div>
+                        </div>
+                      } @else {
+                        <div style="color: #64748b; font-size: 12px; font-style: italic;">
+                          Aucun règlement enregistré pour le moment.
+                        </div>
+                      }
+                    </div>
+
                     @if (selectedMission()!.events && selectedMission()!.events!.length > 0) {
                       <div class="modal-timeline">
                         <h4><i class="fa-solid fa-timeline"></i> Historique d'audit des statuts</h4>

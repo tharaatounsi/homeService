@@ -5,7 +5,50 @@ from apps.accounts.models import User
 from apps.catalog.models import Category
 from apps.catalog.serializers import CategorySerializer
 
-from .models import MissionMessage, RequestPhoto, RequestStatusEvent, ServiceRequest
+from .models import MissionMessage, MissionPayment, MissionQuote, RequestPhoto, RequestStatusEvent, ServiceRequest
+
+
+class MissionQuoteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MissionQuote
+        fields = (
+            "id",
+            "request",
+            "labor_price",
+            "parts_price",
+            "total_price",
+            "description",
+            "status",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("id", "request", "total_price", "created_at", "updated_at")
+
+
+class MissionPaymentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MissionPayment
+        fields = (
+            "id",
+            "request",
+            "method",
+            "amount",
+            "platform_fee",
+            "technician_amount",
+            "transaction_id",
+            "card_last4",
+            "status",
+            "paid_at",
+        )
+        read_only_fields = (
+            "id",
+            "request",
+            "platform_fee",
+            "technician_amount",
+            "transaction_id",
+            "status",
+            "paid_at",
+        )
 
 
 class MissionMessageSerializer(serializers.ModelSerializer):
@@ -71,6 +114,8 @@ class ServiceRequestSerializer(serializers.ModelSerializer):
     technician_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
     photos = RequestPhotoSerializer(many=True, read_only=True)
     events = RequestStatusEventSerializer(many=True, read_only=True)
+    quote = MissionQuoteSerializer(read_only=True)
+    payment = MissionPaymentSerializer(read_only=True)
     latitude = serializers.FloatField(write_only=True, required=False, allow_null=True)
     longitude = serializers.FloatField(write_only=True, required=False, allow_null=True)
     lat = serializers.SerializerMethodField(read_only=True)
@@ -104,10 +149,12 @@ class ServiceRequestSerializer(serializers.ModelSerializer):
             "estimated_price",
             "photos",
             "events",
+            "quote",
+            "payment",
             "created_at",
             "updated_at",
         )
-        read_only_fields = ("id", "client", "technician", "status", "estimated_price", "created_at", "updated_at")
+        read_only_fields = ("id", "client", "technician", "status", "estimated_price", "quote", "payment", "created_at", "updated_at")
 
     def get_lat(self, obj):
         return obj.location.y if obj.location else None

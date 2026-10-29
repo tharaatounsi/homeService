@@ -3,6 +3,8 @@ from rest_framework import serializers
 from apps.accounts.models import User
 from apps.accounts.services import register_user
 from apps.catalog.models import Category
+from apps.catalog.serializers import CategorySerializer
+
 
 from .models import AvailabilitySlot, TechnicianProfile
 
@@ -39,7 +41,36 @@ class TechnicianProfileSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class PublicTechnicianProfileSerializer(serializers.ModelSerializer):
+    """Lecture publique du profil technicien pour l'accueil (sans email ni tel privé)."""
+
+    user_id = serializers.IntegerField(source="user.id", read_only=True)
+    username = serializers.CharField(source="user.username", read_only=True)
+    category_list = CategorySerializer(source="categories", many=True, read_only=True)
+    latitude = serializers.FloatField(read_only=True)
+    longitude = serializers.FloatField(read_only=True)
+
+    class Meta:
+        model = TechnicianProfile
+        fields = (
+            "id",
+            "user_id",
+            "username",
+            "bio",
+            "experience_years",
+            "category_list",
+            "latitude",
+            "longitude",
+            "service_radius_km",
+            "is_available",
+            "rating_avg",
+            "rating_count",
+        )
+        read_only_fields = fields
+
+
 class TechnicianAdminCreateSerializer(serializers.Serializer):
+
     """Création directe d'un technicien par l'administrateur."""
 
     username = serializers.CharField(max_length=150)
@@ -61,10 +92,12 @@ class TechnicianAdminCreateSerializer(serializers.Serializer):
 class ProfileUpdateSerializer(serializers.Serializer):
     """Champs modifiables par le technicien via PATCH /technicians/me/."""
 
-    bio = serializers.CharField(required=False, allow_blank=True, max_length=2000)
-    experience_years = serializers.IntegerField(required=False, min_value=0, max_value=60)
+    bio = serializers.CharField(required=False, allow_blank=True, allow_null=True, max_length=2000)
+    experience_years = serializers.IntegerField(
+        required=False, allow_null=True, min_value=0, max_value=60
+    )
     categories = serializers.PrimaryKeyRelatedField(
-        many=True, queryset=Category.objects.all(), required=False
+        many=True, queryset=Category.objects.all(), required=False, allow_null=True
     )
     latitude = serializers.FloatField(
         required=False, allow_null=True, min_value=-90, max_value=90
@@ -72,7 +105,9 @@ class ProfileUpdateSerializer(serializers.Serializer):
     longitude = serializers.FloatField(
         required=False, allow_null=True, min_value=-180, max_value=180
     )
-    service_radius_km = serializers.IntegerField(required=False, min_value=1, max_value=100)
+    service_radius_km = serializers.IntegerField(
+        required=False, allow_null=True, min_value=1, max_value=100
+    )
 
     def validate(self, attrs):
         has_lat = "latitude" in attrs

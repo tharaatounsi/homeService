@@ -1,8 +1,9 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, OnDestroy, OnInit, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
+import { Subscription, interval } from 'rxjs';
 
 import { AuthService } from '../../core/auth.service';
 import {
@@ -11,8 +12,12 @@ import {
   TechnicianProfileResponse,
   TechnicianService,
 } from '../../core/technician.service';
+import { UserService } from '../../core/user.service';
+import { WebSocketService } from '../../core/websocket.service';
+import { MapPickerComponent } from '../../shared/components/map-picker.component';
+import { MessagingTabComponent } from '../../shared/components/messaging-tab.component';
 
-type TechTab = 'profile' | 'schedule' | 'missions' | 'reviews';
+type TechTab = 'profile' | 'schedule' | 'missions' | 'messages' | 'reviews';
 
 interface WeekdayOption {
   value: number;
@@ -22,7 +27,7 @@ interface WeekdayOption {
 @Component({
   selector: 'app-technician-dashboard',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink],
+  imports: [CommonModule, FormsModule, RouterLink, MapPickerComponent, MessagingTabComponent],
   template: `
     <div class="tech-dashboard-page">
       <!-- Navbar -->
@@ -37,6 +42,21 @@ interface WeekdayOption {
           </div>
 
           <div class="user-menu">
+            <span class="ws-status-badge online" title="Synchronisation directe HTTP active">
+              <span class="ws-dot"></span>
+              Contact & Messagerie actifs
+            </span>
+
+            <button
+              type="button"
+              class="btn-logout"
+              (click)="activeTab.set('messages')"
+              style="border-color: #2563eb; color: #2563eb; background: #eff6ff;"
+            >
+              <i class="fa-solid fa-comments"></i>
+              <span>Messagerie ({{ unreadCount() }})</span>
+            </button>
+
             <div class="user-info">
               <span class="username">{{ profile()?.username || auth.user()?.username }}</span>
               <span class="email">{{ profile()?.email || auth.user()?.email }}</span>
@@ -147,7 +167,16 @@ interface WeekdayOption {
               (click)="activeTab.set('missions')"
             >
               <i class="fa-solid fa-clipboard-list"></i>
-              <span>Missions reçues ({{ incomingMissions().length }})</span>
+              <span>Missions ({{ incomingMissions().length + availableMissions().length }})</span>
+            </button>
+
+            <button
+              class="tab-btn"
+              [class.active]="activeTab() === 'messages'"
+              (click)="activeTab.set('messages')"
+            >
+              <i class="fa-solid fa-comments"></i>
+              <span>Messagerie Clients ({{ unreadCount() }})</span>
             </button>
 
             <button
@@ -170,7 +199,7 @@ interface WeekdayOption {
                   <p>Mettez à jour vos métiers, années d'expérience, bio et position géographique.</p>
                 </div>
 
-                <form (ngSubmit)="saveProfile()" class="profile-form">
+                <form novalidate (ngSubmit)="saveProfile()" class="profile-form">
                   <!-- Bio & Experience -->
                   <div class="form-row">
                     <div class="form-group">
@@ -226,34 +255,15 @@ interface WeekdayOption {
                     </div>
                   </div>
 
-                  <!-- Location Google Maps -->
+                  <!-- Location OpenStreetMap / Leaflet -->
                   <div class="form-section">
-                    <label class="section-label"><i class="fa-solid fa-map-location-dot"></i> Emplacement géographique (Google Maps)</label>
-                    
-                    <div class="location-box">
-                      <div class="location-bar">
-                        <button type="button" class="btn-gps" (click)="detectGPSLocation()">
-                          <i class="fa-solid fa-crosshairs"></i> Détecter ma position GPS actuelle
-                        </button>
-                        <span class="coords-text">
-                          Latitude: <strong>{{ profileForm.latitude?.toFixed(4) || 'Non définie' }}</strong> | 
-                          Longitude: <strong>{{ profileForm.longitude?.toFixed(4) || 'Non définie' }}</strong>
-                        </span>
-                      </div>
-
-                      @if (profileForm.latitude && profileForm.longitude) {
-                        <div class="map-iframe-container">
-                          <iframe
-                            [src]="getGoogleMapsEmbedUrl()"
-                            width="100%"
-                            height="240"
-                            style="border:0; border-radius: 0.75rem;"
-                            allowfullscreen=""
-                            loading="lazy"
-                          ></iframe>
-                        </div>
-                      }
-                    </div>
+                    <label class="section-label"><i class="fa-solid fa-map-location-dot"></i> Emplacement géographique de votre base d'intervention</label>
+                    <app-map-picker
+                      [latitude]="profileForm.latitude"
+                      [longitude]="profileForm.longitude"
+                      height="260px"
+                      (locationChange)="onLocationPicked($event)"
+                    ></app-map-picker>
                   </div>
 
                   <div class="form-actions">
@@ -318,50 +328,195 @@ interface WeekdayOption {
               </div>
             }
 
-            <!-- TAB 3: MISSIONS REÇUES -->
+            <!-- TAB 3: MISSIONS -->
             @if (activeTab() === 'missions') {
               <div class="tab-pane">
                 <div class="pane-header">
-                  <h2><i class="fa-solid fa-clipboard-check"></i> Demandes de service reçues</h2>
-                  <p>Consultez et acceptez les demandes d'intervention des clients aux alentours.</p>
+                  <h2><i class="fa-solid fa-clipboard-check"></i> Gestion des missions</h2>
+                  <p>Acceptez de nouvelles demandes de clients et mettez à jour l'avancement de vos interventions.</p>
                 </div>
 
-                <div class="missions-list">
-                  @for (m of incomingMissions(); track m.id) {
-                    <div class="mission-card">
-                      <div class="mission-header">
-                        <div class="cat-badge">
-                          <i class="fa-solid" [class]="getCategoryIcon(m.category_name)"></i>
-                          <span>{{ m.category_name || 'Service' }}</span>
-                        </div>
-                        <span class="urgency-pill" [class]="m.urgency">
-                          Urgence : {{ m.urgency }}
-                        </span>
-                      </div>
+                <!-- Section 1 : Demandes disponibles à accepter -->
+                <div style="margin-bottom: 2rem;">
+                  <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; margin-bottom: 1rem;">
+                    <h3 style="font-size: 1.1rem; color: #1e293b; margin: 0; display: flex; align-items: center; gap: 8px;">
+                      <i class="fa-solid fa-bell" style="color: #2563eb;"></i>
+                      Demandes disponibles ({{ availableMissions().length }})
+                    </h3>
 
-                      <h3 class="mission-title">Demande #{{ m.id }} — {{ m.address || 'Tunis' }}</h3>
-                      <p class="mission-desc">{{ m.description }}</p>
+                    <label style="display: inline-flex; align-items: center; gap: 8px; font-size: 0.875rem; font-weight: 600; cursor: pointer; background: #f8fafc; padding: 6px 14px; border-radius: 8px; border: 1px solid #cbd5e1; user-select: none;">
+                      <input
+                        type="checkbox"
+                        [checked]="expandZones()"
+                        (change)="onToggleExpandZones($event)"
+                        style="cursor: pointer; width: 16px; height: 16px; accent-color: #2563eb;"
+                      />
+                      <span>Élargir à toutes les zones (au-delà de mon rayon)</span>
+                    </label>
+                  </div>
 
-                      <div class="mission-footer">
-                        <div class="client-meta">
-                          <i class="fa-regular fa-user"></i> Client #{{ m.client }}
+                  <div class="missions-list">
+                    @for (m of availableMissions(); track m.id) {
+                      <div class="mission-card" style="border-left: 4px solid #2563eb;">
+                        <div class="mission-header">
+                          <div class="cat-badge">
+                            <i class="fa-solid" [class]="getCategoryIcon(m.category_name)"></i>
+                            <span>{{ m.category_name || 'Service' }}</span>
+                          </div>
+                          @if (m.distance_km !== null && m.distance_km !== undefined) {
+                            <span style="display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700; background: #eff6ff; color: #1d4ed8; padding: 4px 8px; border-radius: 6px; border: 1px solid #bfdbfe;">
+                              <i class="fa-solid fa-route"></i> à {{ m.distance_km }} km de votre base
+                            </span>
+                          }
+                          <span class="urgency-pill" [class]="m.urgency">
+                            Urgence : {{ m.urgency }}
+                          </span>
                         </div>
-                        <div class="action-btns">
-                          <button class="btn-decline" (click)="declineMission(m.id)">Refuser</button>
-                          <button class="btn-accept" (click)="acceptMission(m.id)">
-                            <i class="fa-solid fa-check"></i> Accepter la mission
-                          </button>
+
+                        <h3 class="mission-title">Demande #{{ m.id }} — {{ m.address || 'Tunis' }}</h3>
+                        <p class="mission-desc">{{ m.description }}</p>
+
+                        <div class="mission-footer" style="flex-wrap: wrap; gap: 10px;">
+                          <div class="client-meta" style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px;">
+                            <span><i class="fa-regular fa-user"></i> Client : <strong>{{ m.client_name || '#' + m.client }}</strong></span>
+                            @if (m.client_email) {
+                              <a [href]="'mailto:' + m.client_email" style="font-size: 12px; color: #2563eb; text-decoration: none; font-weight: 600;">
+                                <i class="fa-regular fa-envelope"></i> {{ m.client_email }}
+                              </a>
+                            }
+                            @if (m.client_phone) {
+                              <a [href]="'tel:' + m.client_phone" style="font-size: 12px; color: #059669; text-decoration: none; font-weight: 700;">
+                                <i class="fa-solid fa-phone"></i> {{ m.client_phone }}
+                              </a>
+                            }
+                          </div>
+                          <div class="action-btns" style="display: flex; flex-wrap: wrap; gap: 8px;">
+                            <button
+                              type="button"
+                              (click)="openClientChat(m)"
+                              style="display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; border-radius: 8px; font-weight: 700; cursor: pointer;"
+                            >
+                              <i class="fa-solid fa-comments"></i> Contacter / Messagerie
+                            </button>
+                            <button class="btn-decline" (click)="declineMission(m.id)">Ignorer</button>
+                            <button class="btn-accept" (click)="acceptMission(m.id)">
+                              <i class="fa-solid fa-check"></i> Accepter la mission
+                            </button>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  } @empty {
-                    <div class="empty-state">
-                      <i class="fa-solid fa-inbox icon-empty"></i>
-                      <p>Aucune nouvelle demande de service pour le moment.</p>
-                    </div>
-                  }
+                    } @empty {
+                      <div class="empty-state" style="padding: 2.5rem 1.5rem; text-align: center; background: #f8fafc; border-radius: 12px; border: 1px dashed #cbd5e1;">
+                        <i class="fa-solid fa-location-crosshairs" style="font-size: 2.2rem; color: #94a3b8; margin-bottom: 0.75rem; display: block;"></i>
+                        <p style="margin: 0 0 0.5rem 0; color: #1e293b; font-weight: 600; font-size: 1rem;">
+                          Aucune demande en attente pour le moment
+                        </p>
+                        <p style="margin: 0 0 1.25rem 0; color: #64748b; font-size: 0.875rem;">
+                          Vous pouvez également consulter la Messagerie Clients pour discuter directement avec vos clients.
+                        </p>
+                      </div>
+                    }
+                  </div>
+                </div>
+
+                <!-- Section 2 : Mes missions assignées -->
+                <div>
+                  <h3 style="font-size: 1.1rem; color: #1e293b; margin-bottom: 1rem; display: flex; align-items: center; gap: 8px;">
+                    <i class="fa-solid fa-briefcase" style="color: #10b981;"></i>
+                    Mes interventions assignées ({{ incomingMissions().length }})
+                  </h3>
+
+                  <div class="missions-list">
+                    @for (m of incomingMissions(); track m.id) {
+                      <div class="mission-card" style="border-left: 4px solid #10b981;">
+                        <div class="mission-header">
+                          <div class="cat-badge">
+                            <i class="fa-solid" [class]="getCategoryIcon(m.category_name)"></i>
+                            <span>{{ m.category_name || 'Service' }}</span>
+                          </div>
+                          <span style="display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 700; background: #ecfdf5; color: #047857;">
+                            <i class="fa-solid fa-clock"></i> {{ getStatusBadgeLabel(m.status) }}
+                          </span>
+                        </div>
+
+                        <h3 class="mission-title">Mission #{{ m.id }} — {{ m.address || 'Tunis' }}</h3>
+                        <p class="mission-desc">{{ m.description }}</p>
+
+                        <div class="mission-footer" style="flex-wrap: wrap; gap: 10px;">
+                          <div class="client-meta" style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px;">
+                            <span><i class="fa-regular fa-user"></i> Client : <strong>{{ m.client_name || '#' + m.client }}</strong></span>
+                            @if (m.client_email) {
+                              <a [href]="'mailto:' + m.client_email" style="font-size: 12px; color: #2563eb; text-decoration: none; font-weight: 600;">
+                                <i class="fa-regular fa-envelope"></i> {{ m.client_email }}
+                              </a>
+                            }
+                            @if (m.client_phone) {
+                              <a [href]="'tel:' + m.client_phone" style="font-size: 12px; color: #059669; text-decoration: none; font-weight: 700;">
+                                <i class="fa-solid fa-phone"></i> {{ m.client_phone }}
+                              </a>
+                            }
+                          </div>
+
+                          <div class="action-btns" style="display: flex; gap: 8px; flex-wrap: wrap;">
+                            <button
+                              type="button"
+                              (click)="openClientChat(m)"
+                              style="display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; background: #0f172a; color: #fff; border: none; border-radius: 8px; font-weight: 700; cursor: pointer;"
+                            >
+                              <i class="fa-solid fa-comments"></i> Ouvrir la messagerie
+                            </button>
+                            @if (m.status === 'accepted') {
+                              <button
+                                type="button"
+                                (click)="advanceMissionStatus(m.id, 'en_route')"
+                                style="display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; background: #2563eb; color: #fff; border: none; border-radius: 8px; font-weight: 700; cursor: pointer;"
+                              >
+                                <i class="fa-solid fa-car"></i> Je suis en route
+                              </button>
+                            }
+                            @if (m.status === 'en_route') {
+                              <button
+                                type="button"
+                                (click)="advanceMissionStatus(m.id, 'in_progress')"
+                                style="display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; background: #d97706; color: #fff; border: none; border-radius: 8px; font-weight: 700; cursor: pointer;"
+                              >
+                                <i class="fa-solid fa-wrench"></i> Démarrer l'intervention
+                              </button>
+                            }
+                            @if (m.status === 'in_progress') {
+                              <button
+                                type="button"
+                                (click)="advanceMissionStatus(m.id, 'completed')"
+                                style="display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; background: #16a34a; color: #fff; border: none; border-radius: 8px; font-weight: 700; cursor: pointer;"
+                              >
+                                <i class="fa-solid fa-circle-check"></i> Terminer l'intervention
+                              </button>
+                            }
+                            @if (m.status === 'completed') {
+                              <span style="display: inline-flex; align-items: center; gap: 6px; font-weight: 700; color: #16a34a; font-size: 13px;">
+                                <i class="fa-solid fa-check-double"></i> Mission accomplie avec succès
+                              </span>
+                            }
+                          </div>
+                        </div>
+                      </div>
+                    } @empty {
+                      <div class="empty-state" style="padding: 1.5rem; text-align: center; background: #f8fafc; border-radius: 12px; border: 1px dashed #cbd5e1;">
+                        <p style="margin: 0; color: #64748b; font-size: 0.95rem;">Vous n'avez aucune intervention assignée en cours.</p>
+                      </div>
+                    }
+                  </div>
                 </div>
               </div>
+            }
+
+            <!-- TAB 3.b: MESSAGERIE CLIENTS -->
+            @if (activeTab() === 'messages') {
+              <app-messaging-tab
+                [initialPartnerId]="selectedClientId()"
+                [initialRequestId]="selectedMissionId()"
+                (unreadTotalChange)="unreadCount.set($event)"
+              ></app-messaging-tab>
             }
 
             <!-- TAB 4: AVIS & ÉVALUATIONS -->
@@ -448,6 +603,37 @@ interface WeekdayOption {
       display: flex;
       align-items: center;
       gap: 1.25rem;
+    }
+
+    .ws-status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0.3rem 0.75rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      background: #f1f5f9;
+      color: #64748b;
+      border: 1px solid #cbd5e1;
+
+      .ws-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #94a3b8;
+      }
+
+      &.online {
+        background: #ecfdf5;
+        color: #047857;
+        border-color: #a7f3d0;
+
+        .ws-dot {
+          background: #10b981;
+          box-shadow: 0 0 6px #10b981;
+        }
+      }
     }
 
     .user-info {
@@ -946,17 +1132,25 @@ interface WeekdayOption {
     }
   `]
 })
-export class TechnicianDashboardComponent implements OnInit {
+export class TechnicianDashboardComponent implements OnInit, OnDestroy {
   auth = inject(AuthService);
   techService = inject(TechnicianService);
+  private userService = inject(UserService);
+  wsService = inject(WebSocketService);
   sanitizer = inject(DomSanitizer);
+  private subs = new Subscription();
 
   profile = signal<TechnicianProfileResponse | null>(null);
   allCategories = signal<Category[]>([]);
   incomingMissions = signal<any[]>([]);
+  availableMissions = signal<any[]>([]);
   scheduleSlots = signal<AvailabilitySlotPayload[]>([]);
+  expandZones = signal<boolean>(true);
+  unreadCount = signal<number>(0);
+  selectedClientId = signal<number | null>(null);
+  selectedMissionId = signal<number | null>(null);
 
-  activeTab = signal<TechTab>('profile');
+  activeTab = signal<TechTab>('missions');
   isSubmitting = signal<boolean>(false);
   toastMessage = signal<string | null>(null);
   isToastError = signal<boolean>(false);
@@ -985,6 +1179,44 @@ export class TechnicianDashboardComponent implements OnInit {
     this.loadProfile();
     this.loadSchedule();
     this.loadMissions();
+    this.loadUnreadMessages();
+    this.initPollingSync();
+  }
+
+  ngOnDestroy(): void {
+    this.subs.unsubscribe();
+  }
+
+  private initPollingSync(): void {
+    // Synchronisation automatique par HTTP toutes les 4 secondes (sans WebSocket)
+    this.subs.add(
+      interval(4000).subscribe(() => {
+        this.loadMissions();
+        this.loadUnreadMessages();
+      })
+    );
+  }
+
+  loadUnreadMessages(): void {
+    this.userService.getConversations().subscribe({
+      next: (list) => {
+        const total = (list || []).reduce((acc, c) => acc + (c.unread_count || 0), 0);
+        if (total > this.unreadCount() && this.activeTab() !== 'messages') {
+          this.showToast('Nouveau message client reçu dans votre messagerie !');
+        }
+        this.unreadCount.set(total);
+      },
+    });
+  }
+
+  openClientChat(mission: any): void {
+    if (mission.client) {
+      this.selectedClientId.set(Number(mission.client));
+    }
+    if (mission.id) {
+      this.selectedMissionId.set(Number(mission.id));
+    }
+    this.activeTab.set('messages');
   }
 
   loadCategories(): void {
@@ -1020,7 +1252,26 @@ export class TechnicianDashboardComponent implements OnInit {
     this.techService.getIncomingMissions().subscribe({
       next: (list) => this.incomingMissions.set(list || []),
     });
+    this.loadAvailableMissions();
   }
+
+  loadAvailableMissions(): void {
+    this.techService.getAvailableMissions(this.expandZones()).subscribe({
+      next: (list) => this.availableMissions.set(list || []),
+    });
+  }
+
+  onToggleExpandZones(event: Event): void {
+    const checked = (event.target as HTMLInputElement).checked;
+    this.expandZones.set(checked);
+    this.loadAvailableMissions();
+  }
+
+  enableAllZones(): void {
+    this.expandZones.set(true);
+    this.loadAvailableMissions();
+  }
+
 
   // --- ONLINE / OFFLINE TOGGLE ---
   onToggleAvailability(event: Event): void {
@@ -1067,6 +1318,11 @@ export class TechnicianDashboardComponent implements OnInit {
     }
   }
 
+  onLocationPicked(coords: { lat: number; lng: number }): void {
+    this.profileForm.latitude = coords.lat;
+    this.profileForm.longitude = coords.lng;
+  }
+
   getGoogleMapsEmbedUrl(): SafeResourceUrl {
     const lat = this.profileForm.latitude || 36.8065;
     const lng = this.profileForm.longitude || 10.1815;
@@ -1077,14 +1333,31 @@ export class TechnicianDashboardComponent implements OnInit {
   // --- SAVE PROFILE ---
   saveProfile(): void {
     this.isSubmitting.set(true);
-    this.techService.updateProfile({
-      bio: this.profileForm.bio,
-      experience_years: this.profileForm.experience_years,
-      service_radius_km: this.profileForm.service_radius_km,
-      categories: this.profileForm.categories,
-      latitude: this.profileForm.latitude,
-      longitude: this.profileForm.longitude,
-    }).subscribe({
+
+    const expYears = Number(this.profileForm.experience_years);
+    const radius = Number(this.profileForm.service_radius_km);
+
+    const payload: any = {
+      bio: (this.profileForm.bio || '').trim(),
+      experience_years: isNaN(expYears) || expYears < 0 ? 0 : Math.min(expYears, 60),
+      service_radius_km: isNaN(radius) || radius < 1 ? 10 : Math.min(radius, 100),
+      categories: Array.isArray(this.profileForm.categories) ? this.profileForm.categories : [],
+    };
+
+    if (
+      this.profileForm.latitude !== null &&
+      this.profileForm.latitude !== undefined &&
+      this.profileForm.longitude !== null &&
+      this.profileForm.longitude !== undefined
+    ) {
+      payload.latitude = Number(this.profileForm.latitude);
+      payload.longitude = Number(this.profileForm.longitude);
+    } else {
+      payload.latitude = null;
+      payload.longitude = null;
+    }
+
+    this.techService.updateProfile(payload).subscribe({
       next: (updated) => {
         this.isSubmitting.set(false);
         this.profile.set(updated);
@@ -1092,8 +1365,31 @@ export class TechnicianDashboardComponent implements OnInit {
       },
       error: (err) => {
         this.isSubmitting.set(false);
-        const msg = err.error?.detail || 'Erreur lors de la sauvegarde du profil.';
-        this.showToast(msg, true);
+        let errorMsg = 'Erreur lors de la sauvegarde du profil.';
+        if (err.error) {
+          if (typeof err.error === 'string') {
+            errorMsg = err.error;
+          } else if (err.error.detail) {
+            errorMsg = err.error.detail;
+          } else if (typeof err.error === 'object') {
+            const firstKey = Object.keys(err.error)[0];
+            if (firstKey) {
+              const val = err.error[firstKey];
+              const fieldLabels: Record<string, string> = {
+                experience_years: "Années d'expérience",
+                service_radius_km: "Rayon d'action",
+                categories: "Métiers",
+                latitude: "Latitude",
+                longitude: "Longitude",
+                bio: "Bio",
+              };
+              const label = fieldLabels[firstKey] || firstKey;
+              const detail = Array.isArray(val) ? val.join(' ') : String(val);
+              errorMsg = `${label} : ${detail}`;
+            }
+          }
+        }
+        this.showToast(errorMsg, true);
       },
     });
   }
@@ -1132,15 +1428,51 @@ export class TechnicianDashboardComponent implements OnInit {
     });
   }
 
-  // --- MISSIONS ---
+  // --- MISSIONS ACTIONS ---
   acceptMission(id: number): void {
-    this.showToast(`Mission #${id} acceptée avec succès !`);
+    this.techService.acceptMission(id).subscribe({
+      next: () => {
+        this.showToast(`Mission #${id} acceptée avec succès ! Elle apparaît maintenant dans vos missions assignées.`);
+        this.loadMissions();
+      },
+      error: (err) => {
+        const msg = err.error?.detail || 'Impossible d\'accepter cette mission.';
+        this.showToast(msg, true);
+      },
+    });
+  }
+
+  advanceMissionStatus(id: number, nextStatus: string): void {
+    this.techService.updateMissionStatus(id, nextStatus).subscribe({
+      next: () => {
+        this.showToast('Statut de la mission mis à jour !');
+        this.loadMissions();
+      },
+      error: (err) => {
+        const msg = err.error?.detail || 'Transition de statut impossible.';
+        this.showToast(msg, true);
+      },
+    });
   }
 
   declineMission(id: number): void {
-    this.incomingMissions.update((list) => list.filter((m) => m.id !== id));
-    this.showToast(`Mission #${id} déclinée.`);
+    this.availableMissions.update((list) => list.filter((m) => m.id !== id));
+    this.showToast(`Mission #${id} retirée de la liste.`);
   }
+
+  getStatusBadgeLabel(status: string): string {
+    const labels: Record<string, string> = {
+      pending: 'En attente',
+      accepted: 'Acceptée',
+      en_route: 'Technicien en route',
+      in_progress: 'En cours d\'intervention',
+      completed: 'Terminée',
+      paid: 'Payée',
+      cancelled: 'Annulée',
+    };
+    return labels[status] || status;
+  }
+
 
   private showToast(msg: string, isError = false): void {
     this.toastMessage.set(msg);

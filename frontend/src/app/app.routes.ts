@@ -15,6 +15,10 @@ const technicianDashboard = () =>
     (m) => m.TechnicianDashboardComponent
   );
 
+const adminDashboard = () =>
+  import('./features/admin/admin-dashboard.component').then((m) => m.AdminDashboardComponent);
+
+
 export const routes: Routes = [
   { path: '', pathMatch: 'full', redirectTo: 'login' },
   { path: 'login', component: LoginComponent },
@@ -47,7 +51,8 @@ export const routes: Routes = [
     path: 'admin',
     canActivate: [authGuard, roleGuard(['admin'])],
     data: { title: 'Espace administrateur' },
-    loadComponent: roleHome,
+    loadComponent: adminDashboard,
   },
+
   { path: '**', redirectTo: 'login' },
 ];

@@ -271,3 +271,14 @@ class TechnicianTests(APITestCase):
         response = self.client.get("/api/catalog/categories/")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data), 2)
+
+    def test_public_technicians_list_unauthenticated(self):
+        self.profile.is_approved = True
+        self.profile.save()
+
+        response = self.client.get("/api/technicians/public/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
+        self.assertNotIn("email", response.data[0])
+        self.assertNotIn("phone", response.data[0])
+        self.assertEqual(response.data[0]["username"], "tech1")

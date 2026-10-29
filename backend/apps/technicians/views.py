@@ -2,6 +2,7 @@ from django.shortcuts import get_object_or_404
 from rest_framework import generics, status
 from rest_framework.response import Response
 
+from rest_framework.permissions import AllowAny
 from apps.accounts.permissions import IsAdminRole, IsTechnician
 
 from .models import TechnicianProfile
@@ -9,11 +10,13 @@ from .serializers import (
     AvailabilitySlotSerializer,
     EmptySerializer,
     ProfileUpdateSerializer,
+    PublicTechnicianProfileSerializer,
     ScheduleSerializer,
     StatusSerializer,
     TechnicianAdminCreateSerializer,
     TechnicianProfileSerializer,
 )
+
 from .services import (
     approve_technician,
     reject_technician,
@@ -30,6 +33,8 @@ class TechnicianMeView(generics.GenericAPIView):
     serializer_class = ProfileUpdateSerializer
 
     def get_object(self):
+        from apps.missions.views import _ensure_demo_accounts_ready
+        _ensure_demo_accounts_ready()
         return get_object_or_404(TechnicianProfile, user=self.request.user)
 
     def get(self, request, *args, **kwargs):
@@ -144,3 +149,24 @@ class TechnicianRejectView(generics.GenericAPIView):
         profile = get_object_or_404(TechnicianProfile, pk=pk)
         updated_profile = reject_technician(profile)
         return Response(TechnicianProfileSerializer(updated_profile).data)
+
+
+class PublicTechnicianListView(generics.ListAPIView):
+    """Liste publique des techniciens approuvés pour la page d'accueil."""
+
+    serializer_class = PublicTechnicianProfileSerializer
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def get_queryset(self):
+        from apps.missions.views import _ensure_demo_accounts_ready
+        _ensure_demo_accounts_ready()
+        qs = (
+            TechnicianProfile.objects.filter(is_approved=True)
+            .select_related("user")
+            .prefetch_related("categories")
+        )
+        category_slug = self.request.query_params.get("category")
+        if category_slug:
+            qs = qs.filter(categories__slug=category_slug)
+        return qs

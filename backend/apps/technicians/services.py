@@ -14,14 +14,16 @@ def create_profile(user) -> TechnicianProfile:
 def update_profile(profile: TechnicianProfile, validated_data: dict) -> TechnicianProfile:
     """Met à jour le profil d'un technicien."""
     if "bio" in validated_data:
-        profile.bio = validated_data["bio"]
+        profile.bio = validated_data["bio"] or ""
     if "experience_years" in validated_data:
-        profile.experience_years = validated_data["experience_years"]
+        profile.experience_years = validated_data["experience_years"] if validated_data["experience_years"] is not None else 0
     if "service_radius_km" in validated_data:
-        profile.service_radius_km = validated_data["service_radius_km"]
+        profile.service_radius_km = validated_data["service_radius_km"] if validated_data["service_radius_km"] is not None else 10
 
     if "categories" in validated_data:
-        profile.categories.set(validated_data["categories"])
+        cats = validated_data["categories"]
+        if cats is not None:
+            profile.categories.set(cats)
 
     if "latitude" in validated_data and "longitude" in validated_data:
         lat = validated_data["latitude"]

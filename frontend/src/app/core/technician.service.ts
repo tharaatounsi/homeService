@@ -34,6 +34,21 @@ export interface TechnicianProfileResponse {
   rating_count: number;
 }
 
+export interface PublicTechnicianProfile {
+  id: number;
+  user_id?: number;
+  username: string;
+  bio: string;
+  experience_years: number;
+  category_list: Category[];
+  latitude: number | null;
+  longitude: number | null;
+  service_radius_km: number;
+  is_available: boolean;
+  rating_avg: string | number;
+  rating_count: number;
+}
+
 export interface ProfileUpdatePayload {
   bio?: string;
   experience_years?: number;
@@ -46,6 +61,10 @@ export interface ProfileUpdatePayload {
 @Injectable({ providedIn: 'root' })
 export class TechnicianService {
   private http = inject(HttpClient);
+
+  getPublicTechnicians(): Observable<PublicTechnicianProfile[]> {
+    return this.http.get<PublicTechnicianProfile[]>(`${API_URL}/technicians/public/`);
+  }
 
   getCategories(): Observable<Category[]> {
     return this.http.get<Category[]>(`${API_URL}/catalog/categories/`);
@@ -76,4 +95,31 @@ export class TechnicianService {
   getIncomingMissions(): Observable<any[]> {
     return this.http.get<any[]>(`${API_URL}/missions/requests/`);
   }
+
+  getAvailableMissions(allZones: boolean = false): Observable<any[]> {
+    const url = allZones
+      ? `${API_URL}/missions/requests/?scope=available&all_zones=true`
+      : `${API_URL}/missions/requests/?scope=available`;
+    return this.http.get<any[]>(url);
+  }
+
+  acceptMission(id: number): Observable<any> {
+    return this.http.post<any>(`${API_URL}/missions/requests/${id}/accept/`, {});
+  }
+
+  updateMissionStatus(id: number, status: string): Observable<any> {
+    return this.http.post<any>(`${API_URL}/missions/requests/${id}/status/`, { status });
+  }
+
+  cancelMission(id: number): Observable<any> {
+    return this.http.post<any>(`${API_URL}/missions/requests/${id}/cancel/`, {});
+  }
+
+  emitMissionLocation(id: number, lat: number, lng: number): Observable<any> {
+    return this.http.post<any>(`${API_URL}/missions/requests/${id}/location/`, {
+      latitude: lat,
+      longitude: lng,
+    });
+  }
 }
+

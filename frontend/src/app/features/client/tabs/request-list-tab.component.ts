@@ -129,6 +129,36 @@ import { LiveTrackingMapComponent } from '../../../shared/components/live-tracki
                   @if (req.quote.description) {
                     <p class="quote-desc"><i class="fa-solid fa-circle-info"></i> {{ req.quote.description }}</p>
                   }
+
+                  @if (req.quote.ml_audit; as ml) {
+                    <div
+                      style="margin-top: 10px; padding: 10px 12px; border-radius: 10px; font-size: 12px;"
+                      [style.background]="ml.risk_level === 'low' ? '#ecfdf5' : (ml.risk_level === 'medium' ? '#fffbeb' : '#fef2f2')"
+                      [style.border]="ml.risk_level === 'low' ? '1px solid #a7f3d0' : (ml.risk_level === 'medium' ? '1px solid #fde68a' : '1px solid #fecaca')"
+                    >
+                      <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px;">
+                        <strong
+                          style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px;"
+                          [style.color]="ml.risk_level === 'low' ? '#065f46' : (ml.risk_level === 'medium' ? '#92400e' : '#991b1b')"
+                        >
+                          <span>🤖 Audit ML du Devis : {{ ml.risk_label }}</span>
+                        </strong>
+                        <span
+                          style="padding: 2px 8px; border-radius: 999px; font-weight: 700; font-size: 11px;"
+                          [style.background]="ml.risk_level === 'low' ? '#d1fae5' : (ml.risk_level === 'medium' ? '#fef3c7' : '#fee2e2')"
+                          [style.color]="ml.risk_level === 'low' ? '#047857' : (ml.risk_level === 'medium' ? '#b45309' : '#b91c1c')"
+                        >
+                          Risque Anomalie : {{ ml.anomaly_percent }}% · Litige SAV : {{ ml.dispute_risk_percent }}%
+                        </span>
+                      </div>
+                      <p
+                        style="margin: 4px 0 0; line-height: 1.4;"
+                        [style.color]="ml.risk_level === 'low' ? '#064e3b' : (ml.risk_level === 'medium' ? '#78350f' : '#7f1d1d')"
+                      >
+                        {{ ml.explanation }}
+                      </p>
+                    </div>
+                  }
                 </div>
                 @if (req.quote.status === 'pending') {
                   <div class="quote-actions">

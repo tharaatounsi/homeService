@@ -837,5 +837,177 @@ class ServiceRequestInvoiceView(generics.GenericAPIView):
         return Response(invoice_data)
 
 
+# ==============================================================================
+# SPRINT 8 : AVIS CLIENTS (1-5 ÉTOILES), RÉPUTATION TECHNICIEN & LITIGES SAV
+# ==============================================================================
+from .models import MissionDispute, MissionReview, recalculate_technician_rating
+from .serializers import MissionDisputeSerializer, MissionReviewSerializer
+
+
+class ServiceRequestReviewView(generics.GenericAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = MissionReviewSerializer
+
+    def get(self, request, pk):
+        sr = generics.get_object_or_404(ServiceRequest, pk=pk)
+        rev = getattr(sr, "review", None)
+        if not rev:
+            return Response({"detail": "Aucun avis pour cette mission."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(MissionReviewSerializer(rev).data)
+
+    def post(self, request, pk):
+        sr = generics.get_object_or_404(ServiceRequest, pk=pk)
+        if sr.client != request.user and getattr(request.user, "role", None) != "admin":
+            raise PermissionDenied("Seul le client de la mission peut déposer un avis.")
+        if not sr.technician:
+            raise ValidationError({"detail": "Aucun technicien assigné à cette mission."})
+
+        rating = int(request.data.get("rating", 5) or 5)
+        rating = max(1, min(5, rating))
+        comment = (request.data.get("comment") or "").strip()
+        raw_tags = request.data.get("tags", "")
+        if isinstance(raw_tags, list):
+            tags_str = ",".join(str(t).strip() for t in raw_tags if str(t).strip())
+        else:
+            tags_str = str(raw_tags or "").strip()
+
+        rev, created = MissionReview.objects.update_or_create(
+            request=sr,
+            defaults={
+                "client": sr.client,
+                "technician": sr.technician,
+                "rating": rating,
+                "comment": comment,
+                "tags": tags_str,
+            },
+        )
+        recalculate_technician_rating(sr.technician)
+        return Response(
+            MissionReviewSerializer(rev).data,
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
+
+class ServiceRequestReviewReplyView(generics.GenericAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = MissionReviewSerializer
+
+    def post(self, request, pk):
+        sr = generics.get_object_or_404(ServiceRequest, pk=pk)
+        rev = getattr(sr, "review", None)
+        if not rev:
+            raise ValidationError({"detail": "Aucun avis client trouvé sur cette mission."})
+        if sr.technician != request.user and getattr(request.user, "role", None) != "admin":
+            raise PermissionDenied("Seul le technicien évalué peut répondre à cet avis.")
+
+        reply_text = (request.data.get("technician_reply") or "").strip()
+        rev.technician_reply = reply_text
+        rev.replied_at = timezone.now()
+        rev.save()
+        return Response(MissionReviewSerializer(rev).data)
+
+
+class TechnicianReviewsListView(generics.GenericAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        reviews = MissionReview.objects.filter(technician=request.user).select_related(
+            "client", "request", "request__category"
+        )
+        dist = {str(s): 0 for s in range(1, 6)}
+        total_r = 0
+        count_r = 0
+        for r in reviews:
+            dist[str(r.rating)] = dist.get(str(r.rating), 0) + 1
+            total_r += r.rating
+            count_r += 1
+        avg_r = round(total_r / count_r, 2) if count_r > 0 else 0.0
+        return Response({
+            "rating_avg": avg_r,
+            "rating_count": count_r,
+            "distribution": dist,
+            "reviews": MissionReviewSerializer(reviews, many=True).data,
+        })
+
+
+class ServiceRequestDisputeView(generics.GenericAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = MissionDisputeSerializer
+
+    def post(self, request, pk):
+        sr = generics.get_object_or_404(ServiceRequest, pk=pk)
+        reason = request.data.get("reason", MissionDispute.Reason.QUALITY)
+        description = (request.data.get("description") or "").strip()
+        if not description:
+            raise ValidationError({"detail": "Veuillez décrire le motif du litige."})
+
+        dispute, created = MissionDispute.objects.update_or_create(
+            request=sr,
+            defaults={
+                "opened_by": request.user,
+                "reason": reason,
+                "description": description,
+            },
+        )
+        return Response(
+            MissionDisputeSerializer(dispute).data,
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
+
+class AdminDisputeListView(generics.ListAPIView):
+    permission_classes = [IsAdminRole]
+    serializer_class = MissionDisputeSerializer
+    queryset = MissionDispute.objects.all().select_related("request", "opened_by", "resolved_by")
+
+
+class AdminDisputeDetailView(generics.GenericAPIView):
+    permission_classes = [IsAdminRole]
+    serializer_class = MissionDisputeSerializer
+
+    def patch(self, request, pk):
+        dispute = generics.get_object_or_404(MissionDispute, pk=pk)
+        new_status = request.data.get("status")
+        note = request.data.get("admin_resolution_note")
+        if new_status:
+            dispute.status = new_status
+        if note is not None:
+            dispute.admin_resolution_note = note
+        if dispute.status in [MissionDispute.Status.RESOLVED, MissionDispute.Status.REJECTED]:
+            dispute.resolved_by = request.user
+            dispute.resolved_at = timezone.now()
+        dispute.save()
+        return Response(MissionDisputeSerializer(dispute).data)
+
+
+class AdminReviewListView(generics.ListAPIView):
+    permission_classes = [IsAdminRole]
+    serializer_class = MissionReviewSerializer
+    queryset = MissionReview.objects.all().select_related("client", "technician", "request")
+
+
+class AdminReviewDeleteView(generics.DestroyAPIView):
+    permission_classes = [IsAdminRole]
+    queryset = MissionReview.objects.all()
+
+    def perform_destroy(self, instance):
+        tech = instance.technician
+        instance.delete()
+        recalculate_technician_rating(tech)
+
+
+class MissionAIDiagnosticView(generics.GenericAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        from .ai_service import diagnose_service_request
+        description = (request.data.get("description") or "").strip()
+        if not description:
+            raise ValidationError({"detail": "Veuillez décrire brièvement votre panne pour lancer l'analyse IA."})
+        category_id = request.data.get("category_id") or request.data.get("category")
+        return Response(diagnose_service_request(description, category_id), status=status.HTTP_200_OK)
+
+
+
 
 

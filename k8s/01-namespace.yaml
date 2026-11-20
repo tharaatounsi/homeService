@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: servicehome
+  labels:
+    app.kubernetes.io/name: servicehome
+    app.kubernetes.io/part-of: servicehome-platform

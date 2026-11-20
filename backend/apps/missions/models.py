@@ -176,3 +176,91 @@ class MissionPayment(models.Model):
     def __str__(self):
         return f"Paiement #{self.transaction_id} : {self.amount} TND ({self.method})"
 
+
+class MissionReview(models.Model):
+    """Évaluation client (1 à 5 étoiles, tags, commentaire) et réponse du technicien (Sprint 8)."""
+
+    request = models.OneToOneField(
+        ServiceRequest, on_delete=models.CASCADE, related_name="review"
+    )
+    client = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="reviews_given"
+    )
+    technician = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="reviews_received"
+    )
+    rating = models.PositiveSmallIntegerField(default=5)
+    comment = models.TextField(blank=True)
+    tags = models.CharField(max_length=255, blank=True)
+    technician_reply = models.TextField(blank=True)
+    replied_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Avis #{self.id} ({self.rating}/5) pour {self.technician}"
+
+
+def recalculate_technician_rating(technician_user):
+    """Recalcule rating_avg et rating_count sur TechnicianProfile."""
+    if not technician_user:
+        return
+    from django.db.models import Avg, Count
+    from apps.technicians.models import TechnicianProfile
+
+    agg = MissionReview.objects.filter(technician=technician_user).aggregate(
+        avg_r=Avg("rating"), cnt=Count("id")
+    )
+    avg_val = round(float(agg["avg_r"] or 0.0), 2)
+    cnt_val = int(agg["cnt"] or 0)
+    TechnicianProfile.objects.filter(user=technician_user).update(
+        rating_avg=avg_val, rating_count=cnt_val
+    )
+
+
+class MissionDispute(models.Model):
+    """Réclamation SAV / Litige ouvert sur une mission et arbitré par l'Admin (Sprint 8)."""
+
+    class Reason(models.TextChoices):
+        QUALITY = "quality", "Qualité de l'intervention / Panne non résolue"
+        PRICING = "pricing", "Écart de prix / Contestation du devis"
+        DELAY = "delay", "Retard important / Absence du prestataire"
+        BEHAVIOR = "behavior", "Comportement inapproprié"
+        OTHER = "other", "Autre motif"
+
+    class Status(models.TextChoices):
+        OPEN = "open", "Ouvert (En attente d'examen)"
+        IN_REVIEW = "in_review", "En médiation Admin"
+        RESOLVED = "resolved", "Résolu"
+        REJECTED = "rejected", "Clôturé sans suite"
+
+    request = models.OneToOneField(
+        ServiceRequest, on_delete=models.CASCADE, related_name="dispute"
+    )
+    opened_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="disputes_opened"
+    )
+    reason = models.CharField(max_length=30, choices=Reason.choices, default=Reason.QUALITY)
+    description = models.TextField()
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.OPEN)
+    admin_resolution_note = models.TextField(blank=True)
+    resolved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="disputes_resolved",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Litige #{self.id} (Mission #{self.request_id}) - {self.status}"
+
+

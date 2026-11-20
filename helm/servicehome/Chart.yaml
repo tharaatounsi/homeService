@@ -1,0 +1,16 @@
+apiVersion: v2
+name: servicehome
+description: Chart Helm officiel pour le déploiement Cloud-Native de la plateforme ServiceHome (Django 5, PostGIS, Channels, Celery, Angular 20 & Moteurs IA/ML)
+type: application
+version: 1.0.0
+appVersion: "1.11.0"
+keywords:
+  - servicehome
+  - django
+  - postgis
+  - angular
+  - machine-learning
+  - prometheus
+  - grafana
+maintainers:
+  - name: Équipe ServiceHome

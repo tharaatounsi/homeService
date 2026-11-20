@@ -8,3 +8,14 @@ media/
 .cache/
 .npm/
 *.log
+.angular/
+coverage/
+.coverage
+htmlcov/
+
+# Terraform binaries & local state (ne jamais pousser les binaires .exe > 100 Mo sur GitHub)
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+crash.log
+*.tfvars

@@ -356,12 +356,21 @@ from django.test import TransactionTestCase
 
 class WebSocketMissionConsumerTests(TransactionTestCase):
     def setUp(self):
+        User.objects.filter(username="ws_test_user").delete()
         self.user = User.objects.create_user(
             username="ws_test_user",
             email="ws_test@example.com",
             password=PASSWORD,
             role=User.Role.CLIENT,
         )
+
+    def _fixture_teardown(self):
+        from django.db import connection
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "TRUNCATE TABLE accounts_user, catalog_category, technicians_technicianprofile, "
+                "missions_servicerequest RESTART IDENTITY CASCADE;"
+            )
 
     async def _test_auth_flow(self):
         from channels.testing import WebsocketCommunicator

@@ -1,0 +1,122 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "id": 1,
+      "title": "Disponibilité Backend ServiceHome (UP)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus_ds" },
+      "targets": [{ "expr": "servicehome_up", "refId": "A" }],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Moteurs IA / ML Actifs (NLP + Colab ML)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus_ds" },
+      "targets": [{ "expr": "servicehome_ai_models_loaded", "refId": "A" }],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "blue", "value": null }]
+          }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Techniciens En Ligne / Approuvés",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus_ds" },
+      "targets": [
+        { "expr": "servicehome_technicians_online_total", "legendFormat": "En ligne", "refId": "A" },
+        { "expr": "servicehome_technicians_approved_total", "legendFormat": "Approuvés", "refId": "B" }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Chiffre d'Affaires Total Encaissé (TND)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus_ds" },
+      "targets": [{ "expr": "servicehome_revenue_tnd_total", "refId": "A" }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyTND",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          }
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Litiges SAV Ouverts",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus_ds" },
+      "targets": [{ "expr": "servicehome_disputes_open_total", "refId": "A" }],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 1 },
+              { "color": "red", "value": 5 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Répartition des Missions par Statut (Temps Réel)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus_ds" },
+      "targets": [
+        { "expr": "servicehome_missions_total", "legendFormat": "Statut: {{status}}", "refId": "A" }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Utilisateurs par Rôle RBAC & Devis Audités par le ML",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus_ds" },
+      "targets": [
+        { "expr": "servicehome_users_total", "legendFormat": "Utilisateurs ({{role}})", "refId": "A" },
+        { "expr": "servicehome_quotes_total", "legendFormat": "Devis ML ({{status}})", "refId": "B" }
+      ]
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 39,
+  "tags": ["servicehome", "django", "postgis", "ai", "ml"],
+  "templating": { "list": [] },
+  "time": { "from": "now-15m", "to": "now" },
+  "title": "ServiceHome — Supervision Temps Réel, PostGIS & Moteurs IA/ML",
+  "uid": "servicehome-main-dashboard",
+  "version": 1
+}

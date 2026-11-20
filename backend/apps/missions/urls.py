@@ -1,11 +1,17 @@
 from django.urls import path
 
 from .views import (
+    AdminDisputeDetailView,
+    AdminDisputeListView,
+    AdminReviewDeleteView,
+    AdminReviewListView,
     ConversationListView,
     DirectConversationMessagesView,
+    MissionAIDiagnosticView,
     ServiceRequestAcceptView,
     ServiceRequestCancelView,
     ServiceRequestDetailView,
+    ServiceRequestDisputeView,
     ServiceRequestInvoiceView,
     ServiceRequestListCreateView,
     ServiceRequestLocationView,
@@ -14,8 +20,11 @@ from .views import (
     ServiceRequestPayView,
     ServiceRequestQuoteRespondView,
     ServiceRequestQuoteView,
+    ServiceRequestReviewReplyView,
+    ServiceRequestReviewView,
     ServiceRequestStatusView,
     ServiceRequestTrackingView,
+    TechnicianReviewsListView,
 )
 
 urlpatterns = [
@@ -32,6 +41,15 @@ urlpatterns = [
     path("requests/<int:pk>/quote/respond/", ServiceRequestQuoteRespondView.as_view(), name="request-quote-respond"),
     path("requests/<int:pk>/pay/", ServiceRequestPayView.as_view(), name="request-pay"),
     path("requests/<int:pk>/invoice/", ServiceRequestInvoiceView.as_view(), name="request-invoice"),
+    path("requests/<int:pk>/review/", ServiceRequestReviewView.as_view(), name="request-review"),
+    path("requests/<int:pk>/review/reply/", ServiceRequestReviewReplyView.as_view(), name="request-review-reply"),
+    path("requests/<int:pk>/dispute/", ServiceRequestDisputeView.as_view(), name="request-dispute"),
+    path("reviews/technician/", TechnicianReviewsListView.as_view(), name="technician-reviews"),
+    path("reviews/", AdminReviewListView.as_view(), name="admin-reviews-list"),
+    path("reviews/<int:pk>/", AdminReviewDeleteView.as_view(), name="admin-reviews-delete"),
+    path("disputes/", AdminDisputeListView.as_view(), name="admin-disputes-list"),
+    path("disputes/<int:pk>/", AdminDisputeDetailView.as_view(), name="admin-disputes-detail"),
+    path("ai-diagnose/", MissionAIDiagnosticView.as_view(), name="mission-ai-diagnose"),
     path("conversations/", ConversationListView.as_view(), name="conversation-list"),
     path("conversations/<int:partner_id>/messages/", DirectConversationMessagesView.as_view(), name="conversation-messages"),
 ]

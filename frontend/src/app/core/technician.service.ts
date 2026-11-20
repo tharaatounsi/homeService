@@ -3,7 +3,14 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 
 import { API_URL } from './config';
-import { MissionInvoiceData, MissionPaymentData, MissionQuoteData } from './user.service';
+import { MissionInvoiceData, MissionPaymentData, MissionQuoteData, MissionReviewData } from './user.service';
+
+export interface TechnicianReviewsSummaryResponse {
+  rating_avg: number;
+  rating_count: number;
+  distribution: Record<string, number>;
+  reviews: MissionReviewData[];
+}
 
 export interface Category {
   id: number;
@@ -139,6 +146,16 @@ export class TechnicianService {
 
   getInvoice(id: number): Observable<MissionInvoiceData> {
     return this.http.get<MissionInvoiceData>(`${API_URL}/missions/requests/${id}/invoice/`);
+  }
+
+  getMyReviews(): Observable<TechnicianReviewsSummaryResponse> {
+    return this.http.get<TechnicianReviewsSummaryResponse>(`${API_URL}/missions/reviews/technician/`);
+  }
+
+  replyToReview(requestId: number, technicianReply: string): Observable<MissionReviewData> {
+    return this.http.post<MissionReviewData>(`${API_URL}/missions/requests/${requestId}/review/reply/`, {
+      technician_reply: technicianReply,
+    });
   }
 }
 

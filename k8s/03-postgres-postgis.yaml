@@ -1,0 +1,73 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgis-pvc
+  namespace: servicehome
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres-postgis
+  namespace: servicehome
+spec:
+  serviceName: "postgres-postgis"
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres-postgis
+  template:
+    metadata:
+      labels:
+        app: postgres-postgis
+    spec:
+      containers:
+        - name: postgis
+          image: postgis/postgis:16-3.4
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: servicehome-config
+                  key: DB_NAME
+            - name: POSTGRES_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: servicehome-config
+                  key: DB_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: servicehome-secret
+                  key: DB_PASSWORD
+          volumeMounts:
+            - name: pgdata
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "servicehome", "-d", "servicehome"]
+            initialDelaySeconds: 10
+            periodSeconds: 5
+      volumes:
+        - name: pgdata
+          persistentVolumeClaim:
+            claimName: postgis-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-postgis
+  namespace: servicehome
+spec:
+  selector:
+    app: postgres-postgis
+  ports:
+    - port: 5432
+      targetPort: 5432

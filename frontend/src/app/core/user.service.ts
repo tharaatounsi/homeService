@@ -27,6 +27,20 @@ export interface ChangePasswordPayload {
   new_password_confirm: string;
 }
 
+export interface MissionQuoteMLAudit {
+  risk_level: 'low' | 'medium' | 'high';
+  risk_label: string;
+  anomaly_probability: number;
+  anomaly_percent: number;
+  dispute_risk_percent: number;
+  initial_estimated_tnd: number;
+  expected_benchmark_tnd: number;
+  price_deviation_pct: number;
+  parts_to_labor_ratio: number;
+  explanation: string;
+  model_source: string;
+}
+
 export interface MissionQuoteData {
   id: number;
   request: number;
@@ -35,7 +49,63 @@ export interface MissionQuoteData {
   total_price: number | string;
   description: string;
   status: 'pending' | 'accepted' | 'rejected';
+  ml_audit?: MissionQuoteMLAudit;
   created_at?: string;
+}
+
+export interface MissionReviewData {
+  id: number;
+  request: number;
+  client: number;
+  client_name: string;
+  client_email?: string;
+  technician: number;
+  technician_name: string;
+  category_name?: string;
+  rating: number;
+  comment: string;
+  tags: string;
+  tags_list: string[];
+  technician_reply?: string;
+  replied_at?: string | null;
+  created_at: string;
+}
+
+export interface MissionDisputeData {
+  id: number;
+  request: number;
+  opened_by: number;
+  opened_by_name: string;
+  opened_by_role: string;
+  client_name?: string;
+  technician_name?: string;
+  category_name?: string;
+  reason: 'quality' | 'pricing' | 'delay' | 'behavior' | 'other';
+  reason_display: string;
+  description: string;
+  status: 'open' | 'in_review' | 'resolved' | 'rejected';
+  status_display: string;
+  admin_resolution_note?: string;
+  resolved_by_name?: string;
+  created_at: string;
+  resolved_at?: string | null;
+}
+
+export interface MissionAIDiagnosticResponse {
+  category_id: number | null;
+  category_name: string;
+  urgency: 'low' | 'medium' | 'high' | 'critical';
+  urgency_label: string;
+  estimated_price: number;
+  min_price: number;
+  max_price: number;
+  historical_avg_used?: number | null;
+  confidence: number;
+  confidence_percent: number;
+  matched_keywords: string[];
+  urgency_triggers: string[];
+  safety_tips: string[];
+  diagnostic_summary: string;
 }
 
 export interface MissionPaymentData {
@@ -287,6 +357,27 @@ export class UserService {
 
   getInvoice(requestId: number): Observable<MissionInvoiceData> {
     return this.http.get<MissionInvoiceData>(`${API_URL}/missions/requests/${requestId}/invoice/`);
+  }
+
+  submitReview(
+    requestId: number,
+    payload: { rating: number; comment: string; tags: string[] }
+  ): Observable<MissionReviewData> {
+    return this.http.post<MissionReviewData>(`${API_URL}/missions/requests/${requestId}/review/`, payload);
+  }
+
+  submitDispute(
+    requestId: number,
+    payload: { reason: string; description: string }
+  ): Observable<MissionDisputeData> {
+    return this.http.post<MissionDisputeData>(`${API_URL}/missions/requests/${requestId}/dispute/`, payload);
+  }
+
+  analyzeWithAI(description: string, categoryId?: number): Observable<MissionAIDiagnosticResponse> {
+    return this.http.post<MissionAIDiagnosticResponse>(`${API_URL}/missions/ai-diagnose/`, {
+      description,
+      category_id: categoryId,
+    });
   }
 }
 

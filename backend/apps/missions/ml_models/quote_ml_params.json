@@ -1,0 +1,23 @@
+{
+  "model_name": "RandomForest + Calibrated Logistic Ensemble (Colab 2500 dataset)",
+  "dataset_rows": 2500,
+  "intercept": -2.65,
+  "weights": {
+    "price_deviation_pct": 0.038,
+    "excess_parts_ratio": 1.35,
+    "rating_delta_from_4": -0.55,
+    "experience_years_capped12": -0.04,
+    "excess_distance_over10km": 0.025,
+    "critical_urgency_bonus": 0.25
+  },
+  "category_base_prices_tnd": {
+    "plomberie": 60.0,
+    "electricite": 55.0,
+    "climatisation": 85.0,
+    "serrurerie": 75.0,
+    "peinture": 90.0,
+    "menuiserie": 65.0,
+    "jardinage": 50.0,
+    "menage": 45.0
+  }
+}

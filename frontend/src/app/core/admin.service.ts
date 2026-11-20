@@ -3,7 +3,13 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 
 import { API_URL } from './config';
-import { MissionInvoiceData, MissionPaymentData, MissionQuoteData } from './user.service';
+import {
+  MissionDisputeData,
+  MissionInvoiceData,
+  MissionPaymentData,
+  MissionQuoteData,
+  MissionReviewData,
+} from './user.service';
 
 export interface AdminTechnicianItem {
   id: number;
@@ -128,5 +134,24 @@ export class AdminService {
 
   getInvoice(id: number): Observable<MissionInvoiceData> {
     return this.http.get<MissionInvoiceData>(`${API_URL}/missions/requests/${id}/invoice/`);
+  }
+
+  getDisputes(): Observable<MissionDisputeData[]> {
+    return this.http.get<MissionDisputeData[]>(`${API_URL}/missions/disputes/`);
+  }
+
+  resolveDispute(
+    disputeId: number,
+    payload: { status: string; admin_resolution_note: string }
+  ): Observable<MissionDisputeData> {
+    return this.http.patch<MissionDisputeData>(`${API_URL}/missions/disputes/${disputeId}/`, payload);
+  }
+
+  getReviews(): Observable<MissionReviewData[]> {
+    return this.http.get<MissionReviewData[]>(`${API_URL}/missions/reviews/`);
+  }
+
+  deleteReview(reviewId: number): Observable<void> {
+    return this.http.delete<void>(`${API_URL}/missions/reviews/${reviewId}/`);
   }
 }

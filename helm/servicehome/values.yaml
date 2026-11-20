@@ -1,0 +1,51 @@
+namespace: servicehome
+
+backend:
+  replicaCount: 2
+  image:
+    repository: python
+    tag: 3.12-alpine
+    pullPolicy: IfNotPresent
+  service:
+    type: NodePort
+    port: 8000
+    nodePort: 30801
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 70
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 300m
+      memory: 256Mi
+
+frontend:
+  replicaCount: 2
+  image:
+    repository: nginx
+    tag: alpine
+    pullPolicy: IfNotPresent
+  service:
+    type: NodePort
+    port: 80
+    nodePort: 30201
+
+database:
+  image: postgis/postgis:16-3.4
+  name: servicehome
+  user: servicehome
+  password: servicehome
+  storageSize: 2Gi
+
+redis:
+  image: redis:7-alpine
+  port: 6379
+
+monitoring:
+  enabled: true
+  prometheusNodePort: 30090
+  grafanaNodePort: 30300
